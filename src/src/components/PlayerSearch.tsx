@@ -1,0 +1,218 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Box,
+  TextField,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  List,
+  ListItem,
+  ListItemText,
+  Chip,
+  Typography,
+  Button,
+  Paper,
+  Autocomplete
+} from '@mui/material';
+import type { Player, PlayerRole } from '../types/Player';
+import { loadPlayersData, searchPlayers } from '../services/playersService';
+
+interface PlayerSearchProps {
+  onPlayerSelect: (player: Player) => void;
+  takenPlayers: string[];
+  onMarkPlayerTaken?: (playerName: string) => void;
+}
+
+const PlayerSearch: React.FC<PlayerSearchProps> = ({
+  onPlayerSelect,
+  takenPlayers,
+  onMarkPlayerTaken
+}) => {
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [filteredPlayers, setFilteredPlayers] = useState<Player[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedRole, setSelectedRole] = useState<PlayerRole>('Portiere');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const initializePlayers = async () => {
+      try {
+        const playersData = await loadPlayersData();
+        setPlayers(playersData);
+        setLoading(false);
+      } catch (error) {
+        console.error('Errore nel caricamento giocatori:', error);
+        setLoading(false);
+      }
+    };
+
+    initializePlayers();
+  }, []);
+
+  useEffect(() => {
+    if (players.length > 0) {
+      const filtered = searchPlayers(players, searchTerm, selectedRole, takenPlayers);
+      setFilteredPlayers(filtered.slice(0, 50)); // Limite a 50 risultati per performance
+    }
+  }, [players, searchTerm, selectedRole, takenPlayers]);
+
+  const handlePlayerSelect = (player: Player) => {
+    onPlayerSelect(player);
+    setSearchTerm(''); // Reset search dopo selezione
+  };
+
+  const handleMarkTaken = (playerName: string) => {
+    if (onMarkPlayerTaken) {
+      onMarkPlayerTaken(playerName);
+    }
+  };
+
+  if (loading) {
+    return <Typography>Caricamento giocatori...</Typography>;
+  }
+
+  const availablePlayerNames = filteredPlayers
+    .filter(p => !p.isTaken)
+    .map(p => p.Nome);
+
+  return (
+    <Paper elevation={2} sx={{ p: 2, mb: 2 }}>
+      <Typography variant="h6" gutterBottom>
+        Ricerca Giocatori
+      </Typography>
+      
+      <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+        <FormControl size="small" sx={{ minWidth: 120 }}>
+          <InputLabel>Ruolo</InputLabel>
+          <Select
+            value={selectedRole}
+            label="Ruolo"
+            onChange={(e) => setSelectedRole(e.target.value as PlayerRole)}
+          >
+            <MenuItem value="Portiere">Portiere</MenuItem>
+            <MenuItem value="Centrocampista">Centrocampista</MenuItem>
+            <MenuItem value="Attaccante">Attaccante</MenuItem>
+            <MenuItem value="Tutti">Tutti i ruoli</MenuItem>
+          </Select>
+        </FormControl>
+
+        <Autocomplete
+          size="small"
+          sx={{ flex: 1, minWidth: 250 }}
+          options={availablePlayerNames}
+          value={searchTerm}
+          onInputChange={(_, newValue) => setSearchTerm(newValue)}
+          onChange={(_, newValue) => {
+            if (newValue) {
+              const player = filteredPlayers.find(p => p.Nome === newValue);
+              if (player) {
+                handlePlayerSelect(player);
+              }
+            }
+          }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="Cerca giocatore"
+              placeholder="Inizia a digitare il nome..."
+            />
+          )}
+          freeSolo
+          clearOnEscape
+        />
+      </Box>
+
+      {searchTerm && filteredPlayers.length > 0 && (
+        <Box sx={{ maxHeight: 300, overflow: 'auto' }}>
+          <Typography variant="subtitle2" gutterBottom>
+            Risultati ricerca ({filteredPlayers.length}):
+          </Typography>
+          <List dense>
+            {filteredPlayers.slice(0, 20).map((player) => (
+              <ListItem
+                key={player.Nome}
+                sx={{
+                  border: '1px solid #e0e0e0',
+                  borderRadius: 1,
+                  mb: 1,
+                  backgroundColor: player.isTaken ? '#ffebee' : 'white',
+                  opacity: player.isTaken ? 0.7 : 1
+                }}
+              >
+                <ListItemText
+                  primary={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="body1" fontWeight="bold">
+                        {player.Nome}
+                      </Typography>
+                      <Chip 
+                        label={player.Ruolo} 
+                        size="small" 
+                        color="primary" 
+                        variant="outlined"
+                      />
+                      {player.isTaken && (
+                        <Chip 
+                          label="PRESO" 
+                          size="small" 
+                          color="error"
+                        />
+                      )}
+                    </Box>
+                  }
+                  secondary={
+                    <Typography variant="body2" color="text.secondary">
+                      {player.Squadra} - Media: {player.Media} - FantaMedia: {player.FantaMedia}
+                    </Typography>
+                  }
+                />
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    onClick={() => handlePlayerSelect(player)}
+                    disabled={player.isTaken}
+                  >
+                    Seleziona
+                  </Button>
+                  {!player.isTaken && onMarkPlayerTaken && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="warning"
+                      onClick={() => handleMarkTaken(player.Nome)}
+                    >
+                      Segna come preso
+                    </Button>
+                  )}
+                </Box>
+              </ListItem>
+            ))}
+          </List>
+        </Box>
+      )}
+
+      {takenPlayers.length > 0 && (
+        <Box sx={{ mt: 2 }}>
+          <Typography variant="subtitle2" gutterBottom>
+            Giocatori già presi ({takenPlayers.length}):
+          </Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {takenPlayers.map((playerName) => (
+              <Chip
+                key={playerName}
+                label={playerName}
+                size="small"
+                color="error"
+                variant="filled"
+              />
+            ))}
+          </Box>
+        </Box>
+      )}
+    </Paper>
+  );
+};
+
+export default PlayerSearch;

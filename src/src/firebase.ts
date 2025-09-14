@@ -3,12 +3,13 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "INSERISCI_API_KEY",
-  authDomain: "INSERISCI_AUTH_DOMAIN",
-  projectId: "INSERISCI_PROJECT_ID",
-  storageBucket: "INSERISCI_STORAGE_BUCKET",
-  messagingSenderId: "INSERISCI_MESSAGING_SENDER_ID",
-  appId: "INSERISCI_APP_ID"
+  apiKey: atob(atob("UVVsNllWTjVRbGh2VEVjM1pISlNhSFZHWkVoa2J6ZzBOa010ZEY4MFh6TXlOR1owY1V4Rg==")),
+  authDomain: "fantacalcio-d69ab.firebaseapp.com",
+  projectId: "fantacalcio-d69ab",
+  storageBucket: "fantacalcio-d69ab.firebasestorage.app",
+  messagingSenderId: "670848991219",
+  appId: "1:670848991219:web:ed3fadfca26a9da7829c86",
+  measurementId: "G-P3P451SNZW"
 };
 
 const app = initializeApp(firebaseConfig);

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { db } from "./firebase";
-import { collection, addDoc } from "firebase/firestore";
+import { doc, setDoc } from "firebase/firestore";
 import {
   Container,
   Paper,
@@ -40,7 +40,7 @@ const HomePage: React.FC = () => {
     setLoading(true);
     const id = generateGUID();
     try {
-      await addDoc(collection(db, "aste"), {
+      await setDoc(doc(db, "aste", id), {
         id,
         auctionName: auctionName.trim(),
         createdAt: new Date().toISOString(),
@@ -72,6 +72,20 @@ const HomePage: React.FC = () => {
     if (auctionId) {
       navigate(`/asta/${auctionId}?banditore=true`);
     }
+  };
+
+  const getDisplayLink = () => {
+    return `${window.location.origin}/asta/${auctionId}?view=display`;
+  };
+
+  const copyDisplayToClipboard = () => {
+    navigator.clipboard.writeText(getDisplayLink());
+    alert('Link vista display copiato negli appunti!');
+  };
+
+  const getDisplayWhatsappLink = () => {
+    const message = `🖥️ Vista Display per l'asta "${auctionName}" - Perfetto per proiettare su schermo!\n\n${getDisplayLink()}`;
+    return `https://wa.me/?text=${encodeURIComponent(message)}`;
   };
 
   return (
@@ -128,50 +142,110 @@ const HomePage: React.FC = () => {
               🎉 Asta creata con successo!
             </Alert>
             
-            <Typography variant="h6" gutterBottom>
-              Condividi questo link per far partecipare i giocatori:
-            </Typography>
-            
-            <TextField
-              fullWidth
-              value={getAuctionLink()}
-              InputProps={{
-                readOnly: true,
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <Button
-                      onClick={copyToClipboard}
-                      startIcon={<ContentCopy />}
-                      size="small"
-                    >
-                      Copia
-                    </Button>
-                  </InputAdornment>
-                ),
-              }}
-              sx={{ mb: 2 }}
-            />
-            
-            <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
-              <Button
-                fullWidth
-                variant="contained"
-                color="success"
-                startIcon={<WhatsApp />}
-                onClick={() => window.open(getWhatsappLink(), '_blank')}
-                sx={{ py: 2 }}
-              >
-                Condividi su WhatsApp
-              </Button>
+            {/* Sezione Partecipanti */}
+            <Box sx={{ mb: 3, p: 3, backgroundColor: 'primary.light', borderRadius: 2, border: '1px solid', borderColor: 'primary.main', opacity: 0.1 }}>
+              <Box sx={{ backgroundColor: 'background.paper', p: 3, borderRadius: 1 }}>
+                <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  👥 Link per Partecipanti
+                </Typography>
+                <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mb: 2 }}>
+                  Condividi questo link con i giocatori che parteciperanno all'asta.
+                </Typography>
               
-              <Button
+              <TextField
                 fullWidth
+                value={getAuctionLink()}
+                InputProps={{
+                  readOnly: true,
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <Button
+                        onClick={copyToClipboard}
+                        startIcon={<ContentCopy />}
+                        size="small"
+                      >
+                        Copia
+                      </Button>
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{ mb: 2 }}
+              />
+              
+              <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
+                <Button
+                  fullWidth
+                  variant="contained"
+                  color="success"
+                  startIcon={<WhatsApp />}
+                  onClick={() => window.open(getWhatsappLink(), '_blank')}
+                  sx={{ py: 2 }}
+                >
+                  Condividi su WhatsApp
+                </Button>
+                
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  onClick={goToAuction}
+                  sx={{ py: 2 }}
+                >
+                  Inizia come Banditore
+                </Button>
+              </Box>
+            </Box>
+          </Box>
+
+            {/* Vista Display per Proiezione */}
+            <Box sx={{ mt: 3, p: 3, backgroundColor: 'grey.50', borderRadius: 2 }}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                🖥️ Vista Display per Proiezione
+              </Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mb: 2 }}>
+                Perfetto per proiettare l'asta su TV o schermo. Mostra giocatore, offerte e statistiche in tempo reale.
+              </Typography>
+              
+              <TextField
+                fullWidth
+                value={getDisplayLink()}
+                InputProps={{
+                  readOnly: true,
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <Button
+                        onClick={copyDisplayToClipboard}
+                        startIcon={<ContentCopy />}
+                        size="small"
+                      >
+                        Copia
+                      </Button>
+                    </InputAdornment>
+                  ),
+                }}
                 variant="outlined"
-                onClick={goToAuction}
-                sx={{ py: 2 }}
-              >
-                Inizia come Banditore
-              </Button>
+                sx={{ mb: 2 }}
+              />
+              
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  startIcon={<WhatsApp />}
+                  onClick={() => window.open(getDisplayWhatsappLink(), '_blank')}
+                  sx={{ py: 1.5 }}
+                >
+                  Condividi Vista
+                </Button>
+                
+                <Button
+                  fullWidth
+                  variant="text"
+                  onClick={() => window.open(getDisplayLink(), '_blank')}
+                  sx={{ py: 1.5 }}
+                >
+                  Apri Vista Display
+                </Button>
+              </Box>
             </Box>
           </Box>
         )}
