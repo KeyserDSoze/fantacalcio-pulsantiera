@@ -20,6 +20,12 @@ import {
   ListItem,
   ListItemText,
   ListItemIcon,
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  TableContainer,
 } from "@mui/material";
 import { 
   SportsEsports, 
@@ -58,6 +64,8 @@ interface AuctionData {
   createdAt: string;
   participants: Participant[];
   takenPlayers?: string[];
+  // Optional history of completed sales to show prices for taken players
+  salesHistory?: { playerName: string; price: number; buyer?: string }[];
 }
 
 const AuctionPage: React.FC = () => {
@@ -81,6 +89,9 @@ const AuctionPage: React.FC = () => {
   const [showWelcomeBack, setShowWelcomeBack] = useState(false);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
+  const [showTakenDialog, setShowTakenDialog] = useState(false);
+  const [currentRoleView, setCurrentRoleView] = useState<'Portiere' | 'Centrocampista' | 'Attaccante' | 'Tutti'>('Tutti');
+  const [searchResetCounter, setSearchResetCounter] = useState(0);
 
   // Recupera i dati salvati al caricamento
   useEffect(() => {
@@ -248,7 +259,9 @@ const AuctionPage: React.FC = () => {
         isActive: true,
       });
       setShowPlayerDialog(false);
-      setCurrentPlayerName("");
+  setCurrentPlayerName("");
+  // trigger PlayerSearch to reset its input and exclude the current player from results
+  setSearchResetCounter(c => c + 1);
     } catch (error) {
       console.error("Errore nell'impostare il giocatore:", error);
     }
@@ -266,7 +279,8 @@ const AuctionPage: React.FC = () => {
       const currentTakenPlayers = auction.takenPlayers || [];
       if (!currentTakenPlayers.includes(playerName)) {
         await updateDoc(doc(db, "aste", id!), {
-          takenPlayers: arrayUnion(playerName)
+          takenPlayers: arrayUnion(playerName),
+          salesHistory: arrayUnion({ playerName, price: 0, buyer: 'Banditore' })
         });
       }
     } catch (error) {
@@ -284,6 +298,7 @@ const AuctionPage: React.FC = () => {
         currentBid: 0,
         currentBidder: null,
         isActive: false,
+        salesHistory: arrayUnion({ playerName: auction.currentPlayer, price: auction.currentBid, buyer: auction.currentBidder || 'Base' })
       });
     } catch (error) {
       console.error("Errore nel completare la vendita:", error);
@@ -566,24 +581,30 @@ const AuctionPage: React.FC = () => {
               )}
             </Paper>
 
-            {/* Taken Players Display */}
+            {/* Taken Players: mostra solo il conteggio e bottone per aprire lista filtrata per ruolo */}
             {auction?.takenPlayers && auction.takenPlayers.length > 0 && (
-              <Paper elevation={3} sx={{ p: 3, mt: 3 }}>
-                <Typography variant="h6" gutterBottom textAlign="center" color="error">
-                  ⛔ Giocatori Acquistati ({auction.takenPlayers.length})
-                </Typography>
-                <Box sx={{ maxHeight: '300px', overflow: 'auto' }}>
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                    {auction.takenPlayers.map((player, index) => (
-                      <Chip
-                        key={index}
-                        label={player}
-                        size="small"
-                        color="error"
-                        variant="filled"
-                      />
-                    ))}
-                  </Box>
+              <Paper elevation={3} sx={{ p: 2, mt: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box>
+                  <Typography variant="subtitle1" color="error">
+                    ⛔ Giocatori Aggiudicati: {auction.takenPlayers.length}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Premi "Mostra" per aprire la lista filtrata per ruolo corrente.
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button variant="outlined" size="small" onClick={() => { setCurrentRoleView('Tutti'); setShowTakenDialog(true); }}>
+                    Mostra Tutti
+                  </Button>
+                  <Button variant="contained" color="primary" size="small" onClick={() => { setCurrentRoleView('Portiere'); setShowTakenDialog(true); }}>
+                    Portieri
+                  </Button>
+                  <Button variant="contained" color="primary" size="small" onClick={() => { setCurrentRoleView('Centrocampista'); setShowTakenDialog(true); }}>
+                    Centrocampisti
+                  </Button>
+                  <Button variant="contained" color="primary" size="small" onClick={() => { setCurrentRoleView('Attaccante'); setShowTakenDialog(true); }}>
+                    Attaccanti
+                  </Button>
                 </Box>
               </Paper>
             )}
@@ -856,6 +877,9 @@ const AuctionPage: React.FC = () => {
               onPlayerSelect={handlePlayerSelect}
               takenPlayers={auction?.takenPlayers || []}
               onMarkPlayerTaken={handleMarkPlayerTaken}
+              onShowTakenDialog={(role) => { setCurrentRoleView(role); setShowTakenDialog(true); }}
+              resetTrigger={searchResetCounter}
+              excludedNames={[...(auction?.takenPlayers || []), auction?.currentPlayer || ''].filter(Boolean)}
             />
             
             {/* Controlli Banditore */}
@@ -1100,6 +1124,62 @@ const AuctionPage: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowShareDialog(false)}>Chiudi</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dialog per mostrare i giocatori presi filtrati per ruolo */}
+      <Dialog open={showTakenDialog} onClose={() => setShowTakenDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            ⛔ Giocatori Aggiudicati - {currentRoleView}
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {(() => {
+            const taken = auction?.takenPlayers || [];
+            const detailed = taken
+              .map(name => allPlayers.find(p => p.Nome === name))
+              .filter(Boolean) as Player[];
+
+            const filtered = currentRoleView === 'Tutti' ? detailed : detailed.filter(p => p.Ruolo === currentRoleView);
+
+            if (filtered.length === 0) {
+              return <Typography color="text.secondary">Nessun giocatore trovato per questo ruolo.</Typography>;
+            }
+
+            return (
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Nome</TableCell>
+                      <TableCell>Ruolo</TableCell>
+                      <TableCell>Squadra</TableCell>
+                      <TableCell>Prezzo</TableCell>
+                      <TableCell>Comprato da</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {filtered.map(p => {
+                      const matching = auction?.salesHistory?.find(s => s.playerName === p.Nome);
+                      return (
+                        <TableRow key={p.Nome}>
+                          <TableCell>{p.Nome}</TableCell>
+                          <TableCell>{p.Ruolo}</TableCell>
+                          <TableCell>{p.Squadra}</TableCell>
+                          <TableCell>{matching ? `€${matching.price}` : '—'}</TableCell>
+                          <TableCell>{matching ? matching.buyer || '—' : '—'}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            );
+          })()}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowTakenDialog(false)}>Chiudi</Button>
         </DialogActions>
       </Dialog>
 

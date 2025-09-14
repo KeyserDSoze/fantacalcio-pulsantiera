@@ -22,12 +22,18 @@ interface PlayerSearchProps {
   onPlayerSelect: (player: Player) => void;
   takenPlayers: string[];
   onMarkPlayerTaken?: (playerName: string) => void;
+  onShowTakenDialog?: (role: PlayerRole) => void;
+  resetTrigger?: number;
+  excludedNames?: string[];
 }
 
 const PlayerSearch: React.FC<PlayerSearchProps> = ({
   onPlayerSelect,
   takenPlayers,
-  onMarkPlayerTaken
+  onMarkPlayerTaken,
+  onShowTakenDialog,
+  resetTrigger,
+  excludedNames
 }) => {
   const [players, setPlayers] = useState<Player[]>([]);
   const [filteredPlayers, setFilteredPlayers] = useState<Player[]>([]);
@@ -57,6 +63,13 @@ const PlayerSearch: React.FC<PlayerSearchProps> = ({
     }
   }, [players, searchTerm, selectedRole, takenPlayers]);
 
+  // When parent signals reset, clear the search term
+  useEffect(() => {
+    if (typeof resetTrigger !== 'undefined') {
+      setSearchTerm('');
+    }
+  }, [resetTrigger]);
+
   const handlePlayerSelect = (player: Player) => {
     onPlayerSelect(player);
     setSearchTerm(''); // Reset search dopo selezione
@@ -73,7 +86,7 @@ const PlayerSearch: React.FC<PlayerSearchProps> = ({
   }
 
   const availablePlayerNames = filteredPlayers
-    .filter(p => !p.isTaken)
+  .filter(p => !p.isTaken && !(excludedNames || []).includes(p.Nome))
     .map(p => p.Nome);
 
   return (
@@ -194,21 +207,15 @@ const PlayerSearch: React.FC<PlayerSearchProps> = ({
       )}
 
       {takenPlayers.length > 0 && (
-        <Box sx={{ mt: 2 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            Giocatori già presi ({takenPlayers.length}):
+        <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ flex: 1 }}>
+            Giocatori già presi: {takenPlayers.length}
           </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {takenPlayers.map((playerName) => (
-              <Chip
-                key={playerName}
-                label={playerName}
-                size="small"
-                color="error"
-                variant="filled"
-              />
-            ))}
-          </Box>
+          {onShowTakenDialog && (
+            <Button size="small" variant="outlined" onClick={() => onShowTakenDialog(selectedRole)}>
+              Mostra presi
+            </Button>
+          )}
         </Box>
       )}
     </Paper>
