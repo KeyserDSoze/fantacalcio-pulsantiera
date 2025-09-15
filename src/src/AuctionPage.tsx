@@ -646,15 +646,17 @@ const AuctionPage: React.FC = () => {
       setFetchNextLoading(true);
       const data = await fantacalcioApi.getNextPlayer(roleNum, true);
       const apiName = data?.n;
-      if (!apiName) {
-        alert('Risposta API non valida');
+      
+      // Controlla se non ci sono più giocatori disponibili per questo ruolo
+      if (!apiName || apiName.trim() === '') {
+        alert(`🏁 Finiti i ${role.toLowerCase()} disponibili!\n\nPuoi continuare l'asta a chiamata selezionando manualmente i giocatori dalla ricerca.`);
         return;
       }
 
       // Find the player in the loaded players data
       const matched = allPlayers.find(p => p.Nome.trim().toLowerCase() === String(apiName).trim().toLowerCase());
       if (!matched) {
-        alert(`Giocatore restituito dall'API non trovato nei dati: ${apiName}`);
+        alert(`Giocatore restituito dall'API non trovato nei dati: ${apiName}\n\nPuoi continuare l'asta a chiamata selezionando manualmente i giocatori dalla ricerca.`);
         return;
       }
 
@@ -672,7 +674,8 @@ const AuctionPage: React.FC = () => {
       setShowPlayerDialog(false);
     } catch (error) {
       console.error('Errore fetch next player:', error);
-      alert('Errore nel recuperare il prossimo giocatore');
+      // Messaggio più informativo in caso di errore
+      alert('❌ Non ci sono ulteriori giocatori disponibili.\n\nPuoi continuare l\'asta a chiamata selezionando manualmente i giocatori dalla ricerca.');
     } finally {
       setFetchNextLoading(false);
     }
@@ -755,6 +758,20 @@ const AuctionPage: React.FC = () => {
 
         // Aggiorna lo stato delle squadre per riflettere i nuovi budget
         await refreshTeams();
+
+        // Passa automaticamente al prossimo giocatore dello stesso ruolo
+        // Determina il ruolo del giocatore appena venduto
+        if (currentPlayerData?.Ruolo) {
+          try {
+            // Aspetta un attimo per far sì che l'aggiornamento Firestore si propaghi
+            setTimeout(() => {
+              handleFetchNextPlayer(currentPlayerData.Ruolo);
+            }, 500);
+          } catch (nextPlayerError) {
+            console.warn('Errore nel recuperare il prossimo giocatore:', nextPlayerError);
+            // Non bloccare il flusso principale se c'è un errore nel fetch del prossimo
+          }
+        }
       } catch (error) {
         console.error("Errore nel completare la vendita su Firestore:", error);
         setSnackbarSeverity('error');
@@ -1280,13 +1297,45 @@ const AuctionPage: React.FC = () => {
                   Condividi Link Asta
                 </Button>
                 
+                {/* Selezione Ruolo */}
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Seleziona ruolo per prossimo giocatore:
+                  </Typography>
+                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 1, mb: 2 }}>
+                    {(['Portiere', 'Difensore', 'Centrocampista', 'Attaccante'] as const).map((role) => (
+                      <Button
+                        key={role}
+                        variant={currentRoleView === role ? 'contained' : 'outlined'}
+                        size="small"
+                        onClick={() => setCurrentRoleView(role)}
+                        color={
+                          role === 'Portiere' ? 'warning' :
+                          role === 'Difensore' ? 'primary' :
+                          role === 'Centrocampista' ? 'success' : 'error'
+                        }
+                        sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' } }}
+                      >
+                        {role === 'Portiere' ? 'P' :
+                         role === 'Difensore' ? 'D' :
+                         role === 'Centrocampista' ? 'C' : 'A'}
+                      </Button>
+                    ))}
+                  </Box>
+                </Box>
+                
                 <Button
                   variant="contained"
                   startIcon={<SportsEsports />}
                   onClick={() => handleFetchNextPlayer(currentRoleView)}
                   disabled={auction?.isLocked}
+                  color={
+                    currentRoleView === 'Portiere' ? 'warning' :
+                    currentRoleView === 'Difensore' ? 'primary' :
+                    currentRoleView === 'Centrocampista' ? 'success' : 'error'
+                  }
                 >
-                  {fetchNextLoading ? 'Caricamento...' : 'Dammi il prossimo giocatore'}
+                  {fetchNextLoading ? 'Caricamento...' : `Prossimo ${currentRoleView}`}
                 </Button>
 
                 {auction?.currentPlayer && (
