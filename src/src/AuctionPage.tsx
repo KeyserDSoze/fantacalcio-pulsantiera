@@ -35,7 +35,6 @@ import {
   Home,
   Lock,
   LockOpen,
-  PlayArrow,
   Refresh,
   Group,
   Gavel,
@@ -368,7 +367,8 @@ const AuctionPage: React.FC = () => {
 
   const handleBid = async (amount: number) => {
   // Do not allow bids if auction missing, user not joined, auction locked or no player is currently in auction
-  if (!auction || !hasJoined || auction.isLocked || !auction.currentPlayer) return;
+  // Also prevent bidding when in display view or when the current user is the banditore
+  if (!auction || !hasJoined || auction.isLocked || !auction.currentPlayer || isDisplayView || isBanditore) return;
     
     const newBid = auction.currentBid + amount;
     const bidderName = isBanditore ? "Banditore" : playerName.trim();
@@ -385,8 +385,9 @@ const AuctionPage: React.FC = () => {
   };
 
   const handleCustomBid = async () => {
-    // Prevent custom bids when there's no player in auction or auction is locked / user not joined
-    if (!auction || auction.isLocked || !hasJoined || !auction.currentPlayer) {
+  // Prevent custom bids when there's no player in auction or auction is locked / user not joined
+  // Also prevent custom bids in display view or by the banditore
+  if (!auction || auction.isLocked || !hasJoined || !auction.currentPlayer || isDisplayView || isBanditore) {
       alert("Non ci sono giocatori in asta o non puoi fare offerte");
       return;
     }
@@ -876,6 +877,58 @@ const AuctionPage: React.FC = () => {
               </Paper>
             )}
           </Box>
+
+          {/* Teams Panel for Display view */}
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="h5" gutterBottom textAlign="center" color="primary">
+              🏆 Stato Squadre
+            </Typography>
+            {teamsLoading ? (
+              <Box display="flex" justifyContent="center" alignItems="center" py={2}><CircularProgress size={24} /></Box>
+            ) : teamsError ? (
+              <Alert severity="error">Errore caricamento squadre: {teamsError}</Alert>
+            ) : teams && teams.length > 0 ? (
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(1,1fr)', sm: 'repeat(2,1fr)', md: 'repeat(3,1fr)', lg: 'repeat(4,1fr)' }, gap: 2 }}>
+                {(
+                  [...teams].map(t => ({
+                    team: t,
+                    spent: typeof t.cost === 'number' ? t.cost : 0,
+                  }))
+                  .map(x => ({ ...x, remaining: DEFAULT_TEAM_BUDGET - x.spent }))
+                  .sort((a, b) => (b.remaining - a.remaining))
+                ).map((entry, idx) => {
+                  const t = entry.team;
+                  const remaining = entry.remaining;
+                  const roleCounts = (t.players || []).reduce((acc, p) => {
+                    const r = p.role || 0;
+                    if (r === 0) acc.gk++;
+                    else if (r === 1) acc.def++;
+                    else if (r === 2) acc.mid++;
+                    else if (r === 3) acc.att++;
+                    return acc;
+                  }, { gk: 0, def: 0, mid: 0, att: 0 });
+
+                  return (
+                    <Paper key={t.owner || t.name || idx} elevation={1} sx={{ p: 2 }}>
+                      <Typography variant="subtitle2" fontWeight="bold">{t.name}</Typography>
+                      <Typography variant="caption" color="text.secondary">{t.owner || '—'}</Typography>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
+                        <Typography variant="h6" color={remaining < 0 ? 'error.main' : 'success.main'}>€{remaining}</Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
+                        <Chip label={`P: ${roleCounts.gk}`} size="small" />
+                        <Chip label={`D: ${roleCounts.def}`} size="small" />
+                        <Chip label={`C: ${roleCounts.mid}`} size="small" />
+                        <Chip label={`A: ${roleCounts.att}`} size="small" />
+                      </Box>
+                    </Paper>
+                  );
+                })}
+              </Box>
+            ) : (
+              <Typography variant="body2" color="text.secondary" textAlign="center">Nessuna informazione sulle squadre disponibile.</Typography>
+            )}
+          </Box>
         </Box>
 
         {/* Footer Info */}
@@ -1086,8 +1139,9 @@ const AuctionPage: React.FC = () => {
             </Paper>
           )}
 
-          {/* Bid Buttons - Always visible */}
-          <Paper elevation={2} sx={{ p: 2 }}>
+          {/* Bid Buttons - hidden in display view and for banditore */}
+          {!isDisplayView && !isBanditore && (
+            <Paper elevation={2} sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom sx={{ fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
               Fai la tua offerta:
             </Typography>
@@ -1122,7 +1176,8 @@ const AuctionPage: React.FC = () => {
             >
               Offerta Personalizzata
             </Button>
-          </Paper>
+            </Paper>
+          )}
 
           {/* Teams Panel (Banditore) */}
             <Box sx={{ mt: 2 }}>
@@ -1175,8 +1230,8 @@ const AuctionPage: React.FC = () => {
             </Box>
         </Box>
 
-        {/* Pannello Banditore */}
-        {isBanditore && (
+  {/* Pannello Banditore (hidden in display view) */}
+  {isBanditore && !isDisplayView && (
           <Box sx={{ flex: 1, minWidth: { xs: '100%', md: '300px' } }}>
             {/* Ricerca Giocatori */}
             <PlayerSearch
