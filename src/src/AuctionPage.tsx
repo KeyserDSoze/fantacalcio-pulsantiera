@@ -105,6 +105,8 @@ const AuctionPage: React.FC = () => {
   const [teams, setTeams] = useState<TeamInfo[] | null>(null);
   const [teamsLoading, setTeamsLoading] = useState(false);
   const [teamsError, setTeamsError] = useState<string | null>(null);
+  const [teamsInitialLoad, setTeamsInitialLoad] = useState(true);
+  const [teamsRefreshing, setTeamsRefreshing] = useState(false);
 
   const DEFAULT_TEAM_BUDGET = 1000; // assumiamo budget iniziale se non fornito
 
@@ -146,16 +148,33 @@ const AuctionPage: React.FC = () => {
   };
 
   const refreshTeams = async () => {
-    setTeamsLoading(true);
+    // Se è il primo caricamento, mostra il loading normale
+    if (teamsInitialLoad) {
+      setTeamsLoading(true);
+    } else {
+      // Per i refresh successivi, usa l'effetto lampeggio
+      setTeamsRefreshing(true);
+    }
+    
     setTeamsError(null);
     try {
       const t = await fantacalcioApi.getTeams();
       setTeams(t);
+      
+      // Se era il primo caricamento, marca come completato
+      if (teamsInitialLoad) {
+        setTeamsInitialLoad(false);
+      }
     } catch (err: any) {
       console.error('Errore getTeams', err);
       setTeamsError(String(err?.message || err));
     } finally {
       setTeamsLoading(false);
+      
+      // Per l'effetto lampeggio, aspetta un po' prima di rimuoverlo
+      if (!teamsInitialLoad) {
+        setTimeout(() => setTeamsRefreshing(false), 300);
+      }
     }
   };
 
@@ -364,6 +383,14 @@ const AuctionPage: React.FC = () => {
     refreshTeams();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Refresh teams when salesHistory changes (real-time updates for all participants)
+  useEffect(() => {
+    if (auction?.salesHistory) {
+      refreshTeams();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auction?.salesHistory?.length]);
 
   const handleJoinAsPlayer = async () => {
     if (!playerName.trim() || !auction) return;
@@ -595,6 +622,9 @@ const AuctionPage: React.FC = () => {
         setSnackbarSeverity('success');
         setSnackbarMsg('Giocatore assegnato correttamente');
         setSnackbarOpen(true);
+
+        // Aggiorna lo stato delle squadre per riflettere i nuovi budget
+        await refreshTeams();
       } catch (error) {
         console.error("Errore nel completare la vendita su Firestore:", error);
         setSnackbarSeverity('error');
@@ -604,7 +634,7 @@ const AuctionPage: React.FC = () => {
     } catch (err: any) {
       console.error('Errore calling SetPlayer API', err);
       setSnackbarSeverity('error');
-      setSnackbarMsg(`SetPlayer API error: ${err?.message || String(err)}`);
+      setSnackbarMsg(`SetPlayer API error ${err?.message.split(' at Fantasoccer.Application.')?.[0].split('System.Exception')[1] || String(err)}`);
       setSnackbarOpen(true);
       return;
     }
@@ -745,7 +775,7 @@ const AuctionPage: React.FC = () => {
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 2 }}>
+    <Container maxWidth={false} sx={{ py: 2 }}>
       {/* Header */}
       <Paper elevation={2} sx={{ p: 3, mb: 2 }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap">
@@ -840,7 +870,7 @@ const AuctionPage: React.FC = () => {
                   </Typography>
                   {auction.currentBidder && (
                     <Typography variant="body2" color="text.secondary">
-                      di {resolveBuyerDisplay(auction.currentBidder)}
+                      {resolveBuyerDisplay(auction.currentBidder)}
                     </Typography>
                   )}
                 </Box>
@@ -922,8 +952,27 @@ const AuctionPage: React.FC = () => {
               Fai la tua offerta:
             </Typography>
             
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(3, 1fr)', sm: 'repeat(6, 1fr)' }, gap: 1, mb: 2 }}>
-              {[1, 2, 3, 4, 5, 8, 10, 20, 50, 100].map((amount) => (
+           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(2, 1fr)' }, gap: 1, mb: 2 }}>
+              {[1, 3].map((amount) => (
+                <Button
+                  key={amount}
+                  variant="contained"
+                  size="medium"
+                  onClick={() => handleBid(amount)}
+                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer}
+                  sx={{ 
+                    py: { xs: 1.5, sm: 2 },
+                    fontSize: { xs: '1.8rem', sm: '1.9rem' },
+                    minHeight: { xs: '80px', sm: '88px' }
+                  }}
+                >
+                  +€{amount}
+                </Button>
+              ))}
+            </Box>
+            
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(4, 1fr)', sm: 'repeat(6, 1fr)' }, gap: 1, mb: 2 }}>
+              {[2, 4, 5, 6, 7, 8, 10, 15, 20, 25, 50, 100].map((amount) => (
                 <Button
                   key={amount}
                   variant="contained"
@@ -955,7 +1004,7 @@ const AuctionPage: React.FC = () => {
             </Paper>
           )}
 
-          {/* Teams Panel (Banditore) */}
+          {/* Teams Panel */}
             <Box sx={{ mt: 2 }}>
               <Typography variant="subtitle1" gutterBottom>Stato Squadre</Typography>
               {teamsLoading ? (
@@ -963,7 +1012,16 @@ const AuctionPage: React.FC = () => {
               ) : teamsError ? (
                 <Alert severity="error">Errore caricamento squadre: {teamsError}</Alert>
               ) : teams && teams.length > 0 ? (
-                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(1,1fr)', sm: 'repeat(2,1fr)', md: 'repeat(3,1fr)', lg: 'repeat(4,1fr)' }, gap: 2 }}>
+                <Box 
+                  sx={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: { xs: 'repeat(1,1fr)', sm: 'repeat(2,1fr)', md: 'repeat(3,1fr)', lg: 'repeat(5,1fr)' }, 
+                    gap: 2,
+                    opacity: teamsRefreshing ? 0.6 : 1,
+                    transition: 'opacity 0.3s ease-in-out',
+                    transform: teamsRefreshing ? 'scale(0.98)' : 'scale(1)',
+                  }}
+                >
                   {(
                     [...teams].map(t => ({
                       team: t,
@@ -984,14 +1042,25 @@ const AuctionPage: React.FC = () => {
                     }, { gk: 0, def: 0, mid: 0, att: 0 });
 
                     return (
-                      <Paper key={t.owner || t.name || idx} elevation={1} sx={{ p: 2 }}>
+                      <Paper 
+                        key={t.owner || t.name || idx} 
+                        elevation={1} 
+                        sx={{ 
+                          p: 2,
+                          backgroundColor: teamsRefreshing ? 'primary.light' : 'background.paper',
+                          transition: 'background-color 0.3s ease-in-out, transform 0.3s ease-in-out',
+                        }}
+                      >
                         <Typography variant="subtitle2" fontWeight="bold">{t.name}</Typography>
                         <Typography variant="caption" color="text.secondary">{t.owner || '—'}</Typography>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
                           <Typography variant="h6">€{remaining}</Typography>
                         </Box>
                         <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
-                          <Chip label={`P: ${roleCounts.gk} / D: ${roleCounts.def} / C: ${roleCounts.mid} / A: ${roleCounts.att}`} size="small" />
+                          <Chip label={`P: ${roleCounts.gk}`} size="small" color="warning" />
+                          <Chip label={`D: ${roleCounts.def}`} size="small" color="primary" />
+                          <Chip label={`C: ${roleCounts.mid}`} size="small" color="success" />
+                          <Chip label={`A: ${roleCounts.att}`} size="small" color="error" />
                         </Box>
                       </Paper>
                     );
