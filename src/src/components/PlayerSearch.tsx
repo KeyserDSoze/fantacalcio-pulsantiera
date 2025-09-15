@@ -16,9 +16,9 @@ import {
   Autocomplete
 } from '@mui/material';
 import type { Player, PlayerRole } from '../types/Player';
-import { loadPlayersData, searchPlayers } from '../services/playersService';
 
 interface PlayerSearchProps {
+  players?: Player[]; // Ora i players possono essere passati come prop
   onPlayerSelect: (player: Player) => void;
   takenPlayers: string[];
   onMarkPlayerTaken?: (playerName: string) => void;
@@ -28,6 +28,7 @@ interface PlayerSearchProps {
 }
 
 const PlayerSearch: React.FC<PlayerSearchProps> = ({
+  players: playersProp,
   onPlayerSelect,
   takenPlayers,
   onMarkPlayerTaken,
@@ -41,27 +42,64 @@ const PlayerSearch: React.FC<PlayerSearchProps> = ({
   const [selectedRole, setSelectedRole] = useState<PlayerRole>('Portiere');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const initializePlayers = async () => {
-      try {
-        const playersData = await loadPlayersData();
-        setPlayers(playersData);
-        setLoading(false);
-      } catch (error) {
-        console.error('Errore nel caricamento giocatori:', error);
-        setLoading(false);
-      }
-    };
+  // Funzione di ricerca locale (estratta da playersService)
+  const searchPlayers = (
+    playersArray: Player[],
+    searchTerm: string,
+    selectedRole: PlayerRole | 'Tutti',
+    takenPlayers: string[]
+  ): Player[] => {
+    const excludeSet = new Set(excludedNames || []);
+    
+    return playersArray
+      .filter(player => {
+        // Escludi giocatori nella lista di esclusione
+        if (excludeSet.has(player.Nome)) {
+          return false;
+        }
+        
+        // Filtra per ruolo se non è "Tutti"
+        if (selectedRole !== 'Tutti' && player.Ruolo !== selectedRole) {
+          return false;
+        }
+        
+        // Filtra per nome se c'è un termine di ricerca
+        if (searchTerm && !player.Nome.toLowerCase().includes(searchTerm.toLowerCase())) {
+          return false;
+        }
+        
+        return true;
+      })
+      .map(player => ({
+        ...player,
+        isTaken: takenPlayers.includes(player.Nome)
+      }))
+      .sort((a, b) => {
+        // Prima i giocatori non presi, poi per media fantasy
+        if (a.isTaken !== b.isTaken) {
+          return a.isTaken ? 1 : -1;
+        }
+        return b.FantaMedia - a.FantaMedia;
+      });
+  };
 
-    initializePlayers();
-  }, []);
+  useEffect(() => {
+    if (playersProp && playersProp.length > 0) {
+      // Usa i players passati come prop
+      setPlayers(playersProp);
+      setLoading(false);
+    } else {
+      // Fallback: se non vengono passati players, mostra loading
+      setLoading(true);
+    }
+  }, [playersProp]);
 
   useEffect(() => {
     if (players.length > 0) {
       const filtered = searchPlayers(players, searchTerm, selectedRole, takenPlayers);
       setFilteredPlayers(filtered.slice(0, 50)); // Limite a 50 risultati per performance
     }
-  }, [players, searchTerm, selectedRole, takenPlayers]);
+  }, [players, searchTerm, selectedRole, takenPlayers, excludedNames]);
 
   // When parent signals reset, clear the search term
   useEffect(() => {

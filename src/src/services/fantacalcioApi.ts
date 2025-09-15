@@ -65,6 +65,81 @@ export async function setPlayer(email: string, playerName: string, price: number
 
 // (default export consolidated at end of file)
 
+// --- GetAllPlayers API and types --------------------------------------------
+export interface ApiStatPlayerGame {
+  d: number; // day
+  v: number; // vote
+  p: number; // points
+}
+
+export interface ApiRealTeam {
+  n: string; // name
+  a: string; // abbreviation
+}
+
+export interface ApiStatPlayer {
+  // StatPlayer properties
+  z: number; // Summatory
+  f: number; // FantaSummatory
+  v: number; // WithVote
+  q: number; // WithoutVote
+  s: number; // WithSpecial
+  g: number; // Goal
+  p: number; // Penalty
+  u: number; // Assist
+  j: number; // StoppedPenalty
+  m: number; // SufferedGoal
+  w: number; // WrongedPenalty
+  o: number; // OwnGoal
+  y: number; // YellowCard
+  d: number; // RedCard
+  e: number; // IsEnough
+  c: number; // ManOfTheMatch
+  ij: number; // Injured
+  lg?: ApiStatPlayerGame[]; // AllGames
+  
+  // RealPlayer properties
+  n: string; // Name
+  t: ApiRealTeam; // RealTeam
+  r: number; // Role (0=GK,1=DEF,2=MID,3=ATT)
+  a: boolean; // IsActive
+  vh: boolean; // Visible
+}
+
+export interface StatPlayer {
+  // Computed properties
+  average: number;
+  fantaAverage: number;
+  
+  // Raw stats
+  summatory: number;
+  fantaSummatory: number;
+  withVote: number;
+  withoutVote: number;
+  withSpecial: number;
+  goal: number;
+  penalty: number;
+  assist: number;
+  stoppedPenalty: number;
+  sufferedGoal: number;
+  wrongedPenalty: number;
+  ownGoal: number;
+  yellowCard: number;
+  redCard: number;
+  isEnough: number;
+  manOfTheMatch: number;
+  injured: number;
+  allGames?: { day: number; vote: number; points: number }[];
+  
+  // Player info
+  name: string;
+  teamName: string;
+  teamAbbr: string;
+  role: number;
+  isActive: boolean;
+  visible: boolean;
+}
+
 // --- GetTeams API and types -------------------------------------------------
 export interface ApiTeamPlayer {
   p: number; // price
@@ -126,6 +201,56 @@ export async function getTeams(): Promise<TeamInfo[]> {
   });
 }
 
+export async function getAllPlayers(): Promise<StatPlayer[]> {
+  const url = `${BASE}/GetAllPlayers?year=${CONFIG.YEAR}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`GetAllPlayers API error ${res.status}`);
+  const json = await res.json() as ApiStatPlayer[];
+
+  return (json || []).map(player => {
+    const average = player.v > 0 ? player.z / player.v : 0;
+    const fantaAverage = player.v > 0 ? player.f / player.v : 0;
+    
+    return {
+      // Computed properties
+      average,
+      fantaAverage,
+      
+      // Raw stats
+      summatory: player.z,
+      fantaSummatory: player.f,
+      withVote: player.v,
+      withoutVote: player.q,
+      withSpecial: player.s,
+      goal: player.g,
+      penalty: player.p,
+      assist: player.u,
+      stoppedPenalty: player.j,
+      sufferedGoal: player.m,
+      wrongedPenalty: player.w,
+      ownGoal: player.o,
+      yellowCard: player.y,
+      redCard: player.d,
+      isEnough: player.e,
+      manOfTheMatch: player.c,
+      injured: player.ij,
+      allGames: player.lg?.map(game => ({
+        day: game.d,
+        vote: game.v,
+        points: game.p
+      })),
+      
+      // Player info
+      name: player.n,
+      teamName: player.t.n,
+      teamAbbr: player.t.a,
+      role: player.r,
+      isActive: player.a,
+      visible: player.vh,
+    } as StatPlayer;
+  });
+}
+
 // add to default export
 export default Object.assign({}, {
   CONFIG,
@@ -133,5 +258,6 @@ export default Object.assign({}, {
   getTeamName,
   setPlayer,
   getTeams,
+  getAllPlayers,
 });
 

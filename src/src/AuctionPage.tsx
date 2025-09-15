@@ -46,10 +46,9 @@ import {
 import PlayerSearch from "./components/PlayerSearch";
 import msalInstance, { loginRequest } from './msal';
 import fantacalcioApi from './services/fantacalcioApi';
-import type { TeamInfo } from './services/fantacalcioApi';
+import type { TeamInfo, StatPlayer } from './services/fantacalcioApi';
 import { alpha } from '@mui/material/styles';
 import type { Player } from "./types/Player";
-import { loadPlayersData } from "./services/playersService";
 
 interface Participant {
   name: string;
@@ -108,6 +107,43 @@ const AuctionPage: React.FC = () => {
   const [teamsError, setTeamsError] = useState<string | null>(null);
 
   const DEFAULT_TEAM_BUDGET = 1000; // assumiamo budget iniziale se non fornito
+
+  // Funzione per convertire StatPlayer a Player
+  const convertStatPlayerToPlayer = (statPlayer: StatPlayer): Player => {
+    // Conversione ruolo da numero a stringa
+    const getRoleString = (role: number): 'Portiere' | 'Difensore' | 'Centrocampista' | 'Attaccante' => {
+      switch (role) {
+        case 0: return 'Portiere';
+        case 1: return 'Difensore';
+        case 2: return 'Centrocampista';
+        case 3: return 'Attaccante';
+        default: return 'Attaccante';
+      }
+    };
+
+    return {
+      Nome: statPlayer.name,
+      Ruolo: getRoleString(statPlayer.role),
+      Squadra: statPlayer.teamName,
+      Media: statPlayer.average,
+      FantaMedia: statPlayer.fantaAverage,
+      PartiteMaggioriUguali6: statPlayer.isEnough,
+      MotM: statPlayer.manOfTheMatch,
+      ConVoto: statPlayer.withVote,
+      SenzaVoto: statPlayer.withoutVote,
+      Gialli: statPlayer.yellowCard,
+      Rossi: statPlayer.redCard,
+      Reti: statPlayer.goal,
+      Rigori: statPlayer.penalty,
+      Assist: statPlayer.assist,
+      RigoriSbagliati: statPlayer.wrongedPenalty,
+      Autogoal: statPlayer.ownGoal,
+      GoalSubiti: statPlayer.sufferedGoal,
+      RigoriParati: statPlayer.stoppedPenalty,
+      Attivo: statPlayer.isActive,
+      isTaken: false, // Da determinare in base a takenPlayers
+    };
+  };
 
   const refreshTeams = async () => {
     setTeamsLoading(true);
@@ -216,14 +252,15 @@ const AuctionPage: React.FC = () => {
     return () => unsubscribe();
   }, [id, isBanditore, playerName, hasJoined]);
 
-  // Carica i dati dei giocatori all'avvio
+  // Carica i dati dei giocatori all'avvio usando l'API
   useEffect(() => {
     const initializePlayers = async () => {
       try {
-        const playersData = await loadPlayersData();
-        setAllPlayers(playersData);
+        const statPlayers = await fantacalcioApi.getAllPlayers();
+        const convertedPlayers = statPlayers.map(convertStatPlayerToPlayer);
+        setAllPlayers(convertedPlayers);
       } catch (error) {
-        console.error('Errore nel caricamento giocatori:', error);
+        console.error('Errore nel caricamento giocatori dalla API:', error);
       }
     };
 
@@ -445,7 +482,7 @@ const AuctionPage: React.FC = () => {
     }
   };
 
-  // Fetch next player from external API and set as currentPlayer if found in local CSV
+  // Fetch next player from external API and set as currentPlayer if found in loaded players data
   const handleFetchNextPlayer = async (role: 'Portiere' | 'Difensore' | 'Centrocampista' | 'Attaccante') => {
     if (!auction || !isBanditore) return;
     if (auction.isLocked) {
@@ -464,10 +501,10 @@ const AuctionPage: React.FC = () => {
         return;
       }
 
-      // Find the player in the loaded CSV players
+      // Find the player in the loaded players data
       const matched = allPlayers.find(p => p.Nome.trim().toLowerCase() === String(apiName).trim().toLowerCase());
       if (!matched) {
-        alert(`Giocatore restituito dall'API non trovato nel CSV: ${apiName}`);
+        alert(`Giocatore restituito dall'API non trovato nei dati: ${apiName}`);
         return;
       }
 
@@ -577,11 +614,11 @@ const AuctionPage: React.FC = () => {
   const getAuctionLink = () => {
   if (!id) return '';
   // Forza il link per i partecipanti in modo che sia sempre attivo
-  return `${window.location.origin}/auction/${id}?participant=true`;
+  return `${window.location.origin}/asta/${id}?participant=true`;
   };
 
   const getDisplayLink = () => {
-    return `${window.location.origin}/auction/${id}?view=display`;
+    return `${window.location.origin}/asta/${id}?view=display`;
   };
 
   const getWhatsappLink = (url: string, message: string) => {
@@ -680,269 +717,8 @@ const AuctionPage: React.FC = () => {
     );
   }
 
-  // Vista Display per proiezione su schermo
-  if (isDisplayView) {
-    return (
-      <Box sx={{ 
-        minHeight: '100vh', 
-        backgroundColor: 'background.default',
-        p: { xs: 2, sm: 4 },
-        display: 'flex',
-        flexDirection: 'column'
-      }}>
-        {/* Header Display */}
-        <Paper elevation={3} sx={{ p: 3, mb: 3, textAlign: 'center' }}>
-          <Typography variant="h3" component="h1" color="primary" fontWeight="bold" gutterBottom>
-            🏆 {auction?.auctionName}
-          </Typography>
-          <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, flexWrap: 'wrap' }}>
-            {auction?.isLocked ? (
-              <Chip icon={<Lock />} label="ASTA BLOCCATA" color="error" size="medium" sx={{ fontSize: '1.1rem', px: 1 }} />
-            ) : (
-              <Chip icon={<LockOpen />} label="ASTA ATTIVA" color="success" size="medium" sx={{ fontSize: '1.1rem', px: 1 }} />
-            )}
-            <Chip 
-              icon={<Group />} 
-              label={`${auction?.participants?.length || 0} Partecipanti`} 
-              color="primary" 
-              size="medium"
-              sx={{ fontSize: '1.1rem', px: 1 }}
-            />
-          </Box>
-        </Paper>
-
-        {/* Main Display Content */}
-        <Box sx={{ flex: 1, display: 'flex', gap: 3, flexDirection: { xs: 'column', lg: 'row' } }}>
-          {/* Player & Bid Section */}
-          <Box sx={{ flex: 2 }}>
-            {auction?.currentPlayer ? (
-              <Paper elevation={3} sx={{ height: 'fit-content' }}>
-                {/* Player Info */}
-                <Box sx={{ p: 4, textAlign: 'center', borderBottom: '2px solid', borderColor: 'divider' }}>
-                  <Typography variant="h4" color="text.secondary" gutterBottom>
-                    GIOCATORE IN ASTA
-                  </Typography>
-                  <Typography variant="h2" component="div" color="primary" fontWeight="bold" sx={{ mb: 2 }}>
-                    {auction.currentPlayer}
-                  </Typography>
-                  {currentPlayerData && (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, flexWrap: 'wrap', mb: 2 }}>
-                      <Chip label={currentPlayerData.Ruolo} color="primary" size="medium" sx={{ fontSize: '1rem', px: 1 }} />
-                      <Chip label={currentPlayerData.Squadra} variant="outlined" size="medium" sx={{ fontSize: '1rem', px: 1 }} />
-                      <Chip label={`FantaMedia: ${currentPlayerData.FantaMedia.toFixed(1)}`} color="secondary" size="medium" sx={{ fontSize: '1rem', px: 1 }} />
-                    </Box>
-                  )}
-                </Box>
-
-                {/* Bid Info */}
-                <Box sx={{ p: 4, textAlign: 'center', backgroundColor: 'primary.main', color: 'primary.contrastText' }}>
-                  <Typography variant="h4" gutterBottom sx={{ opacity: 0.9 }}>
-                    OFFERTA CORRENTE
-                  </Typography>
-                  <Typography variant="h1" component="div" fontWeight="bold" sx={{ fontSize: { xs: '3rem', sm: '4rem', md: '5rem' } }}>
-                    €{auction.currentBid || 0}
-                  </Typography>
-                  {auction.currentBidder && (
-                    <Typography variant="h5" sx={{ mt: 2, opacity: 0.9 }}>
-                      di {resolveBuyerDisplay(auction.currentBidder)}
-                    </Typography>
-                  )}
-                </Box>
-
-                {/* Player Stats Display */}
-                {currentPlayerData && (
-                  <Box sx={{ p: 3, backgroundColor: 'grey.50' }}>
-                    <Box sx={{ 
-                      display: 'grid', 
-                      gridTemplateColumns: { xs: 'repeat(3, 1fr)', sm: 'repeat(6, 1fr)' }, 
-                      gap: 2,
-                      textAlign: 'center'
-                    }}>
-                      <Box>
-                        <Typography variant="h6" fontWeight="bold">{currentPlayerData.Media.toFixed(1)}</Typography>
-                        <Typography variant="body2" color="text.secondary">Media</Typography>
-                      </Box>
-                      <Box>
-                        <Typography variant="h6" fontWeight="bold">{currentPlayerData.ConVoto}</Typography>
-                        <Typography variant="body2" color="text.secondary">Presenze</Typography>
-                      </Box>
-                      <Box>
-                        <Typography variant="h6" fontWeight="bold" color="success.main">{currentPlayerData.PartiteMaggioriUguali6}</Typography>
-                        <Typography variant="body2" color="text.secondary">Voti ≥6</Typography>
-                      </Box>
-                      {currentPlayerData.Ruolo === 'Portiere' ? (
-                        <>
-                          <Box>
-                            <Typography variant="h6" fontWeight="bold" color="error.main">{currentPlayerData.GoalSubiti}</Typography>
-                            <Typography variant="body2" color="text.secondary">Goal Subiti</Typography>
-                          </Box>
-                          <Box>
-                            <Typography variant="h6" fontWeight="bold" color="success.main">{currentPlayerData.RigoriParati}</Typography>
-                            <Typography variant="body2" color="text.secondary">Rigori Parati</Typography>
-                          </Box>
-                        </>
-                      ) : (
-                        <>
-                          <Box>
-                            <Typography variant="h6" fontWeight="bold" color="success.main">{currentPlayerData.Reti}</Typography>
-                            <Typography variant="body2" color="text.secondary">Goal</Typography>
-                          </Box>
-                          <Box>
-                            <Typography variant="h6" fontWeight="bold" color="info.main">{currentPlayerData.Assist}</Typography>
-                            <Typography variant="body2" color="text.secondary">Assist</Typography>
-                          </Box>
-                        </>
-                      )}
-                      <Box>
-                        <Typography variant="h6" fontWeight="bold" color="warning.main">{currentPlayerData.Gialli}/{currentPlayerData.Rossi}</Typography>
-                        <Typography variant="body2" color="text.secondary">Cartellini</Typography>
-                      </Box>
-                    </Box>
-                  </Box>
-                )}
-              </Paper>
-            ) : (
-              <Paper elevation={3} sx={{ p: 6, textAlign: 'center', backgroundColor: 'grey.100' }}>
-                <Typography variant="h3" color="text.secondary" gutterBottom>
-                  Nessun giocatore in asta
-                </Typography>
-                <Typography variant="h6" color="text.secondary">
-                  In attesa che il banditore selezioni un giocatore
-                </Typography>
-              </Paper>
-            )}
-          </Box>
-
-          {/* Participants List */}
-          <Box sx={{ flex: 1, minWidth: { xs: '100%', lg: '300px' } }}>
-            <Paper elevation={3} sx={{ p: 3, height: 'fit-content' }}>
-              <Typography variant="h5" gutterBottom textAlign="center" color="primary">
-                🎯 Partecipanti ({auction?.participants?.length || 0})
-              </Typography>
-              {auction?.participants && auction.participants.length > 0 ? (
-                <List dense>
-                  {auction.participants.map((participant, index) => (
-                    <ListItem 
-                      key={index}
-                      sx={{ 
-                        border: '1px solid',
-                        borderColor: 'divider',
-                        borderRadius: 1,
-                        mb: 1,
-                        backgroundColor: 'background.paper'
-                      }}
-                    >
-                      <ListItemIcon>
-                        <Person color="primary" />
-                      </ListItemIcon>
-                      <ListItemText 
-                        primary={participant.name}
-                        primaryTypographyProps={{ fontWeight: 'bold' }}
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-              ) : (
-                <Typography color="text.secondary" textAlign="center" sx={{ py: 3 }}>
-                  Nessun partecipante ancora
-                </Typography>
-              )}
-            </Paper>
-
-            {/* Taken Players: mostra solo il conteggio e bottone per aprire lista filtrata per ruolo */}
-            {auction?.takenPlayers && auction.takenPlayers.length > 0 && (
-              <Paper elevation={3} sx={{ p: 2, mt: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Box>
-                  <Typography variant="subtitle1" color="error">
-                    ⛔ Giocatori Aggiudicati: {auction.takenPlayers.length}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Premi "Mostra" per aprire la lista filtrata per ruolo corrente.
-                  </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Button variant="contained" color="primary" size="small" onClick={() => { setCurrentRoleView('Portiere'); setShowTakenDialog(true); }}>
-                    Portieri
-                  </Button>
-                   <Button variant="contained" color="primary" size="small" onClick={() => { setCurrentRoleView('Difensore'); setShowTakenDialog(true); }}>
-                    Difensori
-                  </Button>
-                  <Button variant="contained" color="primary" size="small" onClick={() => { setCurrentRoleView('Centrocampista'); setShowTakenDialog(true); }}>
-                    Centrocampisti
-                  </Button>
-                  <Button variant="contained" color="primary" size="small" onClick={() => { setCurrentRoleView('Attaccante'); setShowTakenDialog(true); }}>
-                    Attaccanti
-                  </Button>
-                </Box>
-              </Paper>
-            )}
-          </Box>
-
-          {/* Teams Panel for Display view */}
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="h5" gutterBottom textAlign="center" color="primary">
-              🏆 Stato Squadre
-            </Typography>
-            {teamsLoading ? (
-              <Box display="flex" justifyContent="center" alignItems="center" py={2}><CircularProgress size={24} /></Box>
-            ) : teamsError ? (
-              <Alert severity="error">Errore caricamento squadre: {teamsError}</Alert>
-            ) : teams && teams.length > 0 ? (
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(1,1fr)', sm: 'repeat(2,1fr)', md: 'repeat(3,1fr)', lg: 'repeat(4,1fr)' }, gap: 2 }}>
-                {(
-                  [...teams].map(t => ({
-                    team: t,
-                    spent: typeof t.cost === 'number' ? t.cost : 0,
-                  }))
-                  .map(x => ({ ...x, remaining: DEFAULT_TEAM_BUDGET - x.spent }))
-                  .sort((a, b) => (b.remaining - a.remaining))
-                ).map((entry, idx) => {
-                  const t = entry.team;
-                  const remaining = entry.remaining;
-                  const roleCounts = (t.players || []).reduce((acc, p) => {
-                    const r = p.role || 0;
-                    if (r === 0) acc.gk++;
-                    else if (r === 1) acc.def++;
-                    else if (r === 2) acc.mid++;
-                    else if (r === 3) acc.att++;
-                    return acc;
-                  }, { gk: 0, def: 0, mid: 0, att: 0 });
-
-                  return (
-                    <Paper key={t.owner || t.name || idx} elevation={1} sx={{ p: 2 }}>
-                      <Typography variant="subtitle2" fontWeight="bold">{t.name}</Typography>
-                      <Typography variant="caption" color="text.secondary">{t.owner || '—'}</Typography>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
-                        <Typography variant="h6" color={remaining < 0 ? 'error.main' : 'success.main'}>€{remaining}</Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
-                        <Chip label={`P: ${roleCounts.gk}`} size="small" />
-                        <Chip label={`D: ${roleCounts.def}`} size="small" />
-                        <Chip label={`C: ${roleCounts.mid}`} size="small" />
-                        <Chip label={`A: ${roleCounts.att}`} size="small" />
-                      </Box>
-                    </Paper>
-                  );
-                })}
-              </Box>
-            ) : (
-              <Typography variant="body2" color="text.secondary" textAlign="center">Nessuna informazione sulle squadre disponibile.</Typography>
-            )}
-          </Box>
-        </Box>
-
-        {/* Footer Info */}
-        <Box sx={{ mt: 3, textAlign: 'center' }}>
-          <Typography variant="body2" color="text.secondary">
-            Vista Display - Aggiornamento in tempo reale
-          </Typography>
-        </Box>
-      </Box>
-    );
-  }
-
-  // Se non è banditore e non ha ancora fatto il join
-  if (!isBanditore && !hasJoined) {
+  // Se non è banditore e non sta vedendo come display=view e non ha ancora fatto il join
+  if (!(isBanditore || isDisplayView) && !hasJoined) {
     return (
       <Container maxWidth="sm" sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', py: 4 }}>
         <Paper elevation={3} sx={{ p: 4, width: '100%' }}>
@@ -1215,10 +991,7 @@ const AuctionPage: React.FC = () => {
                           <Typography variant="h6">€{remaining}</Typography>
                         </Box>
                         <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
-                          <Chip label={`P: ${roleCounts.gk}`} size="small" />
-                          <Chip label={`D: ${roleCounts.def}`} size="small" />
-                          <Chip label={`C: ${roleCounts.mid}`} size="small" />
-                          <Chip label={`A: ${roleCounts.att}`} size="small" />
+                          <Chip label={`P: ${roleCounts.gk} / D: ${roleCounts.def} / C: ${roleCounts.mid} / A: ${roleCounts.att}`} size="small" />
                         </Box>
                       </Paper>
                     );
@@ -1235,6 +1008,7 @@ const AuctionPage: React.FC = () => {
           <Box sx={{ flex: 1, minWidth: { xs: '100%', md: '300px' } }}>
             {/* Ricerca Giocatori */}
             <PlayerSearch
+              players={allPlayers}
               onPlayerSelect={handlePlayerSelect}
               takenPlayers={auction?.takenPlayers || []}
               onMarkPlayerTaken={handleMarkPlayerTaken}
