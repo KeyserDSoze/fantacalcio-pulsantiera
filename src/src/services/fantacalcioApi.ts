@@ -1,5 +1,5 @@
-// const BASE = 'https://apifc.azurewebsites.net/Auction';
-const BASE = 'https://localhost:7223/Auction';
+const BASE = 'https://apifc.azurewebsites.net/Auction';
+// const BASE = 'https://localhost:7223/Auction';
 
 // Default parameters used across the app; will be set dynamically from group configuration
 export let CONFIG = {
