@@ -45,7 +45,7 @@ import {
 } from "@mui/icons-material";
 import PlayerSearch from "./components/PlayerSearch";
 import msalInstance, { loginRequest } from './msal';
-import fantacalcioApi from './services/fantacalcioApi';
+import fantacalcioApi, { updateConfig } from './services/fantacalcioApi';
 import type { TeamInfo, StatPlayer } from './services/fantacalcioApi';
 import { alpha } from '@mui/material/styles';
 import type { Player } from "./types/Player";
@@ -69,6 +69,14 @@ interface AuctionData {
   takenPlayers?: string[];
   // Optional history of completed sales to show prices for taken players
   salesHistory?: { playerName: string; price: number; buyer?: string; buyerEmail?: string | null }[];
+  // Configurazione gruppo (opzionale per compatibilità con aste esistenti)
+  groupConfig?: {
+    groupId: string;
+    groupName: string;
+    leagueId: string;
+    basketId: string;
+    year: string;
+  };
 }
 
 const AuctionPage: React.FC = () => {
@@ -80,6 +88,7 @@ const AuctionPage: React.FC = () => {
   
   const [auction, setAuction] = useState<AuctionData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [configReady, setConfigReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState("");
   const [playerEmail, setPlayerEmail] = useState("");
@@ -190,6 +199,12 @@ const AuctionPage: React.FC = () => {
   };
 
   const refreshTeams = async () => {
+    // Controlla se la configurazione è pronta
+    if (!configReady) {
+      console.warn('Configurazione non ancora pronta, impossibile caricare i team');
+      return;
+    }
+    
     // Se è il primo caricamento, mostra il loading normale
     if (teamsInitialLoad) {
       setTeamsLoading(true);
@@ -222,6 +237,10 @@ const AuctionPage: React.FC = () => {
 
   const fetchTeamNameForEmail = async (email: string) => {
     if (!email) return null;
+    if (!configReady) {
+      console.warn('Configurazione non ancora pronta, impossibile recuperare team name');
+      return null;
+    }
     if (buyerNameCache[email]) return buyerNameCache[email];
     try {
       const teamName = await fantacalcioApi.getTeamName(email);
@@ -287,6 +306,21 @@ const AuctionPage: React.FC = () => {
           const auctionData = doc.data() as AuctionData;
           setAuction(auctionData);
           
+          // Aggiorna il CONFIG se l'asta ha una configurazione gruppo
+          if (auctionData.groupConfig) {
+            updateConfig({
+              GROUP: auctionData.groupConfig.groupId,
+              LEAGUE: auctionData.groupConfig.leagueId,
+              BASKET: auctionData.groupConfig.basketId,
+              YEAR: auctionData.groupConfig.year,
+            });
+            setConfigReady(true);
+          } else {
+            // Asta senza configurazione gruppo - mostra avviso
+            console.warn('Asta senza configurazione gruppo. Le funzionalità API potrebbero non funzionare.');
+            setConfigReady(false);
+          }
+          
           // Verifica se il giocatore è già registrato nell'asta
           if (!isBanditore && playerName) {
             const isAlreadyParticipant = auctionData.participants?.some(
@@ -313,8 +347,10 @@ const AuctionPage: React.FC = () => {
     return () => unsubscribe();
   }, [id, isBanditore, playerName, hasJoined]);
 
-  // Carica i dati dei giocatori all'avvio usando l'API
+  // Carica i dati dei giocatori solo dopo che il CONFIG è pronto
   useEffect(() => {
+    if (!configReady) return; // Aspetta che la configurazione sia pronta
+    
     const initializePlayers = async () => {
       try {
         const statPlayers = await fantacalcioApi.getAllPlayers();
@@ -326,7 +362,7 @@ const AuctionPage: React.FC = () => {
     };
 
     initializePlayers();
-  }, []);
+  }, [configReady]);
 
   // Microsoft login using MSAL popup + Graph to retrieve email
   const signInWithMicrosoft = async () => {
@@ -420,19 +456,20 @@ const AuctionPage: React.FC = () => {
     }
   }, [auction?.currentPlayer, allPlayers]);
 
-  // Load teams for the teams panel
+  // Load teams for the teams panel - solo dopo che il CONFIG è pronto
   useEffect(() => {
+    if (!configReady) return; // Aspetta che la configurazione sia pronta
     refreshTeams();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, configReady]);
 
   // Refresh teams when salesHistory changes (real-time updates for all participants)
   useEffect(() => {
-    if (auction?.salesHistory) {
+    if (configReady && auction?.salesHistory) {
       refreshTeams();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auction?.salesHistory?.length]);
+  }, [auction?.salesHistory?.length, configReady]);
 
   const handleJoinAsPlayer = async () => {
     if (!playerName.trim() || !auction) return;
@@ -594,6 +631,10 @@ const AuctionPage: React.FC = () => {
   // Fetch next player from external API and set as currentPlayer if found in loaded players data
   const handleFetchNextPlayer = async (role: 'Portiere' | 'Difensore' | 'Centrocampista' | 'Attaccante') => {
     if (!auction || !isBanditore) return;
+    if (!configReady) {
+      alert('Configurazione non ancora pronta. Riprova tra qualche secondo.');
+      return;
+    }
     if (auction.isLocked) {
       alert('Asta bloccata, non è possibile impostare giocatori.');
       return;
@@ -660,6 +701,13 @@ const AuctionPage: React.FC = () => {
 
   const handlePlayerSold = async () => {
     if (!auction?.currentPlayer || !isBanditore) return;
+    
+    if (!configReady) {
+      setSnackbarSeverity('error');
+      setSnackbarMsg('Configurazione non ancora pronta. Riprova tra qualche secondo.');
+      setSnackbarOpen(true);
+      return;
+    }
 
     // Resolve buyer email by matching currentBidder with participants
     let buyerEmail: string | null = null;
@@ -891,6 +939,19 @@ const AuctionPage: React.FC = () => {
           </Box>
         </Box>
       </Paper>
+
+      {/* Indicatore Configurazione Gruppo */}
+      {auction?.groupConfig ? (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          🏆 Configurazione Gruppo: <strong>{auction.groupConfig.groupName}</strong> 
+          {` - Anno ${auction.groupConfig.year}`}
+        </Alert>
+      ) : (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          ⚠️ Asta senza configurazione gruppo. Alcune funzionalità potrebbero non essere disponibili. 
+          Le nuove aste richiedono una configurazione gruppo valida.
+        </Alert>
+      )}
 
       {/* Welcome Back Message */}
       {showWelcomeBack && (

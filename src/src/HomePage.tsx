@@ -11,9 +11,16 @@ import {
   Alert,
   InputAdornment,
   CircularProgress,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Card,
+  CardContent,
 } from "@mui/material";
 import { ContentCopy, WhatsApp, SportsEsports } from "@mui/icons-material";
 import { useNavigate } from "react-router-dom";
+import fantacalcioApi, { type Group } from './services/fantacalcioApi';
 
 function generateGUID() {
   // Versione compatibile con TypeScript
@@ -29,18 +36,63 @@ const HomePage: React.FC = () => {
   const [auctionId, setAuctionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Stati per la configurazione del gruppo
+  const [groupId, setGroupId] = useState("");
+  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+  const [selectedLeague, setSelectedLeague] = useState("");
+  const [selectedBasket, setSelectedBasket] = useState("");
+  const [selectedYear, setSelectedYear] = useState("");
+  const [groupLoading, setGroupLoading] = useState(false);
   const navigate = useNavigate();
+
+  // Funzione per recuperare il gruppo
+  const handleGetGroup = async () => {
+    if (!groupId.trim()) {
+      setError("Inserisci l'ID del gruppo");
+      return;
+    }
+    setError(null);
+    setGroupLoading(true);
+    
+    try {
+      const group = await fantacalcioApi.getGroup(groupId);
+      if (group) {
+        setSelectedGroup(group);
+        // Reset delle selezioni precedenti
+        setSelectedLeague("");
+        setSelectedBasket("");
+        setSelectedYear("");
+      } else {
+        setError("Gruppo non trovato");
+        setSelectedGroup(null);
+      }
+    } catch (e) {
+      console.error("Errore durante il recupero del gruppo:", e);
+      setError("Errore durante il recupero del gruppo");
+      setSelectedGroup(null);
+    } finally {
+      setGroupLoading(false);
+    }
+  };
 
   const handleCreateAuction = async () => {
     if (!auctionName.trim()) {
       setError("Inserisci il nome dell'asta");
       return;
     }
+    
+    // Validazione configurazione gruppo (ora obbligatoria)
+    if (!selectedGroup || !selectedLeague || !selectedBasket || !selectedYear) {
+      setError("È necessario configurare un gruppo valido selezionando Gruppo, Lega, Basket e Anno");
+      return;
+    }
+    
     setError(null);
     setLoading(true);
     const id = generateGUID();
     try {
-      await setDoc(doc(db, "aste", id), {
+      const auctionData = {
         id,
         auctionName: auctionName.trim(),
         createdAt: new Date().toISOString(),
@@ -51,7 +103,19 @@ const HomePage: React.FC = () => {
         isLocked: false,
         participants: [],
         createdBy: "banditore", // Chi crea è sempre il banditore
-      });
+        // Aggiungi configurazione gruppo se presente
+        ...(selectedGroup && {
+          groupConfig: {
+            groupId: selectedGroup.i,
+            groupName: selectedGroup.n,
+            leagueId: selectedLeague,
+            basketId: selectedBasket,
+            year: selectedYear,
+          }
+        })
+      };
+      
+      await setDoc(doc(db, "aste", id), auctionData);
       setAuctionId(id);
     } catch (e) {
       setError("Errore nella creazione dell'asta");
@@ -100,6 +164,99 @@ const HomePage: React.FC = () => {
 
         {!auctionId ? (
           <Box>
+            {/* Sezione Configurazione Gruppo */}
+            <Card sx={{ mb: 3 }}>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  🏆 Configurazione Gruppo Fantacalcio (Obbligatoria)
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Inserisci l'ID del gruppo per configurare l'asta con i parametri corretti.
+                </Typography>
+                
+                <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+                  <TextField
+                    label="ID Gruppo"
+                    variant="outlined"
+                    value={groupId}
+                    onChange={(e) => setGroupId(e.target.value)}
+                    disabled={groupLoading}
+                    placeholder="Inserisci GUID del gruppo"
+                    sx={{ flex: 1 }}
+                  />
+                  <Button
+                    variant="outlined"
+                    onClick={handleGetGroup}
+                    disabled={groupLoading || !groupId.trim()}
+                    sx={{ minWidth: 120 }}
+                  >
+                    {groupLoading ? (
+                      <CircularProgress size={20} />
+                    ) : (
+                      'Cerca Gruppo'
+                    )}
+                  </Button>
+                </Box>
+
+                {selectedGroup && (
+                  <Box sx={{ mt: 2 }}>
+                    <Typography variant="subtitle1" gutterBottom>
+                      📋 Gruppo: {selectedGroup.n}
+                    </Typography>
+                    
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <FormControl fullWidth>
+                        <InputLabel>Lega</InputLabel>
+                        <Select
+                          value={selectedLeague}
+                          onChange={(e) => setSelectedLeague(e.target.value)}
+                          label="Lega"
+                        >
+                          {selectedGroup.l?.map((league: any) => (
+                            <MenuItem key={league.i} value={league.i}>
+                              {league.n}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      
+                      <FormControl fullWidth disabled={!selectedLeague}>
+                        <InputLabel>Basket</InputLabel>
+                        <Select
+                          value={selectedBasket}
+                          onChange={(e) => setSelectedBasket(e.target.value)}
+                          label="Basket"
+                        >
+                          {selectedGroup.b?.map((basket: any) => (
+                            <MenuItem key={basket.i} value={basket.i}>
+                              {basket.n}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      
+                      <FormControl fullWidth disabled={!selectedBasket}>
+                        <InputLabel>Anno</InputLabel>
+                        <Select
+                          value={selectedYear}
+                          onChange={(e) => setSelectedYear(e.target.value)}
+                          label="Anno"
+                        >
+                          {selectedGroup.b
+                            ?.find((basket: any) => basket.i === selectedBasket)
+                            ?.y?.map((yearBasket: any) => (
+                              <MenuItem key={yearBasket.y} value={yearBasket.y}>
+                                {yearBasket.y}
+                              </MenuItem>
+                            ))}
+                        </Select>
+                      </FormControl>
+                    </Box>
+                  </Box>
+                )}
+              </CardContent>
+            </Card>
+
             <TextField
               fullWidth
               label="Nome dell'asta"
@@ -123,7 +280,7 @@ const HomePage: React.FC = () => {
               variant="contained"
               size="large"
               onClick={handleCreateAuction}
-              disabled={loading || !auctionName.trim()}
+              disabled={loading || !auctionName.trim() || !selectedGroup || !selectedLeague || !selectedBasket || !selectedYear}
               sx={{ py: 2 }}
             >
               {loading ? (

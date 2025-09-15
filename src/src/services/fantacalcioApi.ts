@@ -1,15 +1,129 @@
 // const BASE = 'https://apifc.azurewebsites.net/Auction';
 const BASE = 'https://localhost:7223/Auction';
 
-// Default parameters used across the app; can be exported and overridden later
-export const CONFIG = {
-  GROUP: '151b462a-d7e6-4449-95e4-94b542f00c81',
-  LEAGUE: '07ef9475-ba67-4e33-98b3-af4e764a5fc8',
-  BASKET: '4f1d66f3-2564-478a-b07c-e0cf976c2962',
-  YEAR: '14',
+// Default parameters used across the app; will be set dynamically from group configuration
+export let CONFIG = {
+  GROUP: '',
+  LEAGUE: '',
+  BASKET: '',
+  YEAR: '',
 };
 
+// Funzione per aggiornare la configurazione dinamicamente
+export function updateConfig(newConfig: Partial<typeof CONFIG>) {
+  CONFIG = { ...CONFIG, ...newConfig };
+}
+
+// Funzione per validare che il CONFIG sia stato configurato
+function validateConfig(): void {
+  if (!CONFIG.GROUP || !CONFIG.LEAGUE || !CONFIG.BASKET || !CONFIG.YEAR) {
+    throw new Error('CONFIG non configurato. Assicurati di aver selezionato un gruppo valido nell\'asta.');
+  }
+}
+
+// Types for Group API response
+export interface VoteLeagueSetting {
+  g: number; // Goal
+  p: number; // Penalty
+  s: number; // SufferedGoal
+  d: number; // StoppedPenalty
+  w: number; // WrongedPenalty
+  o: number; // OwnGoal
+  a: number; // Assist
+  y: number; // YellowCard
+  r: number; // RedCard
+  j: number; // Injury
+  m: number; // ManOfTheMatch
+}
+
+export interface LeagueSetting {
+  v: Record<string, VoteLeagueSetting>; // Votes by Role
+  s: number; // StartingMoney
+  d: number; // DelayedDay
+  c: number; // CancelledDay
+  g: number; // PointForFirstGoal
+  t: number; // PointForNextGoal
+  o: number; // PointForOwnGoal
+  f: number; // DifferencePointForOwnGoal
+  p: number; // PointInHome
+  a: number; // PointForVictory
+  b: number; // PointForDefeat
+  h: number; // PointForDraw
+  "3": number; // PointForStrongDefense
+  "4": number; // PointForStrongDefense4
+  "5": number; // PointForStrongDefense5
+  gp: number; // PointForGoodPeople
+  l: number; // PointForCleanSheet
+  m: number; // MoneyForGoal
+  n: number; // MoneyForSufferedGoal
+  q: boolean; // RandomAuction
+  vp: boolean; // RankWithValuePoints
+  mk: number; // Market
+}
+
+export interface AnnualLeague {
+  y: number; // Year
+  t: number; // Type
+  s: LeagueSetting; // Settings
+}
+
+export interface League {
+  i: string; // Id
+  n: string; // Name
+  m: boolean; // IsMain
+  t: number; // Type
+  y: AnnualLeague[]; // Years
+  b: string[]; // BasketsId
+}
+
+export interface AnnualTeam {
+  n: string; // Name
+  o: string; // Owner
+  a: string[] | null; // AdditionalOwners
+}
+
+export interface YearlyBasket {
+  y: number; // Year
+  t: AnnualTeam[]; // Teams
+}
+
+export interface Basket {
+  i: string; // Id
+  n: string; // Name
+  y: YearlyBasket[]; // Years
+}
+
+export interface UserOfAGroup {
+  u: string; // Username
+  e: string; // Email
+  r: number; // Role
+}
+
+export interface Group {
+  i: string; // Id
+  n: string; // Name
+  l: League[]; // Leagues
+  u: UserOfAGroup[]; // Users
+  b: Basket[]; // Baskets
+}
+
+// Funzione per ottenere i dettagli del gruppo
+export async function getGroup(groupId: string): Promise<Group | null> {
+  if (!groupId) throw new Error('GroupId è richiesto');
+  
+  const url = `${BASE}/GetGroup?groupId=${encodeURIComponent(groupId)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    if (res.status === 404) return null; // Gruppo non trovato
+    throw new Error(`GetGroup API error ${res.status}`);
+  }
+  
+  const group: Group = await res.json();
+  return group;
+}
+
 export async function getNextPlayer(role: number, isRandom = true) {
+  validateConfig();
   const url = `${BASE}/GetNextPlayer?group=${CONFIG.GROUP}&league=${CONFIG.LEAGUE}&year=${CONFIG.YEAR}&isRandom=${isRandom}&role=${role}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`GetNextPlayer API error ${res.status}`);
@@ -19,6 +133,7 @@ export async function getNextPlayer(role: number, isRandom = true) {
 
 export async function getTeamName(email: string): Promise<string | null> {
   if (!email) return null;
+  validateConfig();
   const url = `${BASE}/GetTeamName?group=${CONFIG.GROUP}&basket=${CONFIG.BASKET}&year=${CONFIG.YEAR}&email=${encodeURIComponent(email)}`;
   const res = await fetch(url);
   if (!res.ok) {
@@ -42,6 +157,7 @@ export async function getTeamName(email: string): Promise<string | null> {
 
 export async function setPlayer(email: string, playerName: string, price: number, isRandom = false): Promise<boolean> {
   if (!email) throw new Error('Missing email');
+  validateConfig();
   const url = `${BASE}/SetPlayer?email=${encodeURIComponent(email)}&group=${CONFIG.GROUP}&league=${CONFIG.LEAGUE}&basket=${CONFIG.BASKET}&year=${CONFIG.YEAR}&playerName=${encodeURIComponent(playerName)}&price=${price}&isRandom=${isRandom}`;
   const res = await fetch(url);
   if (!res.ok) {
@@ -177,6 +293,7 @@ export interface TeamPlayer {
 }
 
 export async function getTeams(): Promise<TeamInfo[]> {
+  validateConfig();
   const url = `${BASE}/GetTeams?group=${CONFIG.GROUP}&basket=${CONFIG.BASKET}&year=${CONFIG.YEAR}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`GetTeams API error ${res.status}`);
@@ -202,6 +319,7 @@ export async function getTeams(): Promise<TeamInfo[]> {
 }
 
 export async function getAllPlayers(): Promise<StatPlayer[]> {
+  validateConfig();
   const url = `${BASE}/GetAllPlayers?year=${CONFIG.YEAR}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`GetAllPlayers API error ${res.status}`);
@@ -254,6 +372,8 @@ export async function getAllPlayers(): Promise<StatPlayer[]> {
 // add to default export
 export default Object.assign({}, {
   CONFIG,
+  updateConfig,
+  getGroup,
   getNextPlayer,
   getTeamName,
   setPlayer,
