@@ -104,9 +104,9 @@ const PlayerSearch: React.FC<PlayerSearchProps> = ({
             onChange={(e) => setSelectedRole(e.target.value as PlayerRole)}
           >
             <MenuItem value="Portiere">Portiere</MenuItem>
+            <MenuItem value="Difensore">Difensore</MenuItem>
             <MenuItem value="Centrocampista">Centrocampista</MenuItem>
             <MenuItem value="Attaccante">Attaccante</MenuItem>
-            <MenuItem value="Tutti">Tutti i ruoli</MenuItem>
           </Select>
         </FormControl>
 
@@ -114,7 +114,7 @@ const PlayerSearch: React.FC<PlayerSearchProps> = ({
           size="small"
           sx={{ flex: 1, minWidth: 250 }}
           options={availablePlayerNames}
-          value={searchTerm}
+          inputValue={searchTerm}
           onInputChange={(_, newValue) => setSearchTerm(newValue)}
           onChange={(_, newValue) => {
             if (newValue) {

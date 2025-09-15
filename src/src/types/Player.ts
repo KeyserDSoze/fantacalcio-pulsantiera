@@ -1,6 +1,6 @@
 export interface Player {
   Nome: string;
-  Ruolo: 'Portiere' | 'Centrocampista' | 'Attaccante';
+  Ruolo: 'Portiere' | 'Difensore' | 'Centrocampista' | 'Attaccante';
   Squadra: string;
   Media: number;
   FantaMedia: number;
@@ -21,4 +21,4 @@ export interface Player {
   isTaken?: boolean;
 }
 
-export type PlayerRole = 'Portiere' | 'Centrocampista' | 'Attaccante' | 'Tutti';
+export type PlayerRole = 'Portiere' | 'Difensore' | 'Centrocampista' | 'Attaccante';

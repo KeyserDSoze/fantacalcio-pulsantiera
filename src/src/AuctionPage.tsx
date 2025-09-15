@@ -44,6 +44,7 @@ import {
   ContentCopy,
 } from "@mui/icons-material";
 import PlayerSearch from "./components/PlayerSearch";
+import msalInstance, { loginRequest } from './msal';
 import { alpha } from '@mui/material/styles';
 import type { Player } from "./types/Player";
 import { loadPlayersData } from "./services/playersService";
@@ -51,6 +52,7 @@ import { loadPlayersData } from "./services/playersService";
 interface Participant {
   name: string;
   joinedAt: string;
+  email?: string;
 }
 
 interface AuctionData {
@@ -79,6 +81,7 @@ const AuctionPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState("");
+  const [playerEmail, setPlayerEmail] = useState("");
   const [hasJoined, setHasJoined] = useState(isBanditore);
   const [customBid, setCustomBid] = useState("");
   const [showCustomDialog, setShowCustomDialog] = useState(false);
@@ -90,17 +93,20 @@ const AuctionPage: React.FC = () => {
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [showTakenDialog, setShowTakenDialog] = useState(false);
-  const [currentRoleView, setCurrentRoleView] = useState<'Portiere' | 'Centrocampista' | 'Attaccante' | 'Tutti'>('Tutti');
+  const [currentRoleView, setCurrentRoleView] = useState<'Portiere' | 'Difensore' | 'Centrocampista' | 'Attaccante'>('Portiere');
   const [searchResetCounter, setSearchResetCounter] = useState(0);
+  const [fetchNextLoading, setFetchNextLoading] = useState(false);
 
   // Recupera i dati salvati al caricamento
   useEffect(() => {
     if (!isBanditore && id) {
       const savedPlayerName = localStorage.getItem(`auction_${id}_playerName`);
       const savedHasJoined = localStorage.getItem(`auction_${id}_hasJoined`);
+      const savedPlayerEmail = localStorage.getItem(`auction_${id}_playerEmail`);
       
       if (savedPlayerName && savedHasJoined === 'true') {
         setPlayerName(savedPlayerName);
+        if (savedPlayerEmail) setPlayerEmail(savedPlayerEmail);
         setHasJoined(true);
         setShowWelcomeBack(true);
         // Nascondi il messaggio dopo 3 secondi
@@ -163,6 +169,107 @@ const AuctionPage: React.FC = () => {
     initializePlayers();
   }, []);
 
+  // Microsoft login using MSAL popup + Graph to retrieve email
+  const signInWithMicrosoft = async () => {
+    try {
+      // MSAL requires initialization in some environments — ensure it's initialized before use
+      if (typeof (msalInstance as any).initialize === 'function') {
+        try {
+          await (msalInstance as any).initialize();
+        } catch (initErr) {
+          // Initialization may fail or be unnecessary; log and continue
+          console.warn('MSAL initialize warning', initErr);
+        }
+      }
+
+      const loginResponse = await msalInstance.loginPopup(loginRequest as any);
+      const account = loginResponse.account;
+
+      // Try to acquire token silently, fallback to popup
+      let tokenResponse: any = null;
+      try {
+        tokenResponse = await msalInstance.acquireTokenSilent({ ...loginRequest, account } as any);
+      } catch (silentErr) {
+        try {
+          tokenResponse = await msalInstance.acquireTokenPopup({ ...loginRequest, account } as any);
+        } catch (popupErr) {
+          console.error('Token acquisition failed', popupErr);
+        }
+      }
+
+      // Prefer Graph call to get the definitive email
+      let email = account?.username || '';
+      if (tokenResponse?.accessToken) {
+        try {
+          const g = await fetch('https://graph.microsoft.com/v1.0/me', {
+            headers: {
+              Authorization: `Bearer ${tokenResponse.accessToken}`,
+            },
+          });
+          if (g.ok) {
+            const gjson = await g.json();
+            // Graph returns mail or userPrincipalName
+            email = gjson.mail || gjson.userPrincipalName || email;
+          }
+        } catch (graphErr) {
+          console.error('Graph fetch failed', graphErr);
+        }
+      }
+
+      if (!email) {
+        alert("Impossibile ottenere l'email dall'account Microsoft");
+        return;
+      }
+
+      setPlayerEmail(email);
+
+      // Try to retrieve team name from your API using the logged email.
+      // Assumption: use the same GROUP and LEAGUE/BASKET constants used elsewhere in the app.
+      const GROUP = '151b462a-d7e6-4449-95e4-94b542f00c81';
+      const BASKET = '07ef9475-ba67-4e33-98b3-af4e764a5fc8';
+      const YEAR = '14';
+      const teamApiUrl = `https://apifc.azurewebsites.net/Auction/GetTeamName?group=${GROUP}&basket=${BASKET}&year=${YEAR}&email=${email}`;
+      let teamName: string | null = null;
+      try {
+        const teamRes = await fetch(teamApiUrl);
+        if (teamRes.ok) {
+          // API may return JSON or plain text. Try JSON then fallback to text.
+          const contentType = teamRes.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const tj = await teamRes.json();
+            // try common keys
+            teamName = tj.teamName || tj.name || tj || null;
+          } else {
+            const txt = await teamRes.text();
+            teamName = txt && txt.trim() ? txt.trim() : null;
+          }
+        } else {
+          console.warn('Team API returned non-ok', teamRes.status);
+        }
+      } catch (teamErr) {
+        console.error('Team API error', teamErr);
+      }
+
+      // If we got a team name, use it as the display name; otherwise fallback to email
+      if (teamName) {
+        setPlayerName(teamName);
+        if (id) localStorage.setItem(`auction_${id}_playerName`, teamName);
+      } else {
+        setPlayerName(email);
+        if (id) localStorage.setItem(`auction_${id}_playerName`, email);
+      }
+
+      // persist email
+      if (id) localStorage.setItem(`auction_${id}_playerEmail`, email);
+
+      // join auction
+      setTimeout(() => handleJoinAsPlayer(), 100);
+    } catch (err) {
+      console.error('MSAL login error', err);
+      alert('Login Microsoft fallito');
+    }
+  };
+
   // Aggiorna i dati del giocatore corrente quando cambia
   useEffect(() => {
     if (auction?.currentPlayer && allPlayers.length > 0) {
@@ -184,6 +291,7 @@ const AuctionPage: React.FC = () => {
     if (isAlreadyParticipant) {
       // Se è già partecipante, aggiorna solo lo stato locale
       localStorage.setItem(`auction_${id}_playerName`, playerName.trim());
+      if (playerEmail) localStorage.setItem(`auction_${id}_playerEmail`, playerEmail);
       localStorage.setItem(`auction_${id}_hasJoined`, 'true');
       setHasJoined(true);
       return;
@@ -194,11 +302,13 @@ const AuctionPage: React.FC = () => {
         participants: arrayUnion({
           name: playerName.trim(),
           joinedAt: new Date().toISOString(),
+          email: playerEmail || undefined,
         }),
       });
       
       // Salva nel localStorage
-      localStorage.setItem(`auction_${id}_playerName`, playerName.trim());
+  localStorage.setItem(`auction_${id}_playerName`, playerName.trim());
+  if (playerEmail) localStorage.setItem(`auction_${id}_playerEmail`, playerEmail);
       localStorage.setItem(`auction_${id}_hasJoined`, 'true');
       
       setHasJoined(true);
@@ -208,7 +318,8 @@ const AuctionPage: React.FC = () => {
   };
 
   const handleBid = async (amount: number) => {
-    if (!auction || !hasJoined || auction.isLocked) return;
+  // Do not allow bids if auction missing, user not joined, auction locked or no player is currently in auction
+  if (!auction || !hasJoined || auction.isLocked || !auction.currentPlayer) return;
     
     const newBid = auction.currentBid + amount;
     const bidderName = isBanditore ? "Banditore" : playerName.trim();
@@ -225,10 +336,16 @@ const AuctionPage: React.FC = () => {
   };
 
   const handleCustomBid = async () => {
+    // Prevent custom bids when there's no player in auction or auction is locked / user not joined
+    if (!auction || auction.isLocked || !hasJoined || !auction.currentPlayer) {
+      alert("Non ci sono giocatori in asta o non puoi fare offerte");
+      return;
+    }
+
     const amount = parseInt(customBid);
     if (isNaN(amount) || amount <= 0) return;
-    
-    if (!auction || amount <= auction.currentBid) {
+
+    if (amount <= auction.currentBid) {
       alert("L'offerta deve essere maggiore di quella corrente");
       return;
     }
@@ -264,6 +381,72 @@ const AuctionPage: React.FC = () => {
   setSearchResetCounter(c => c + 1);
     } catch (error) {
       console.error("Errore nell'impostare il giocatore:", error);
+    }
+  };
+
+  // Map role string to API numeric role
+  const roleToNumber = (role: 'Portiere' | 'Difensore' | 'Centrocampista' | 'Attaccante') => {
+    switch (role) {
+      case 'Portiere': return 0;
+      case 'Difensore': return 1;
+      case 'Centrocampista': return 2;
+      case 'Attaccante': return 3;
+      default: return 0;
+    }
+  };
+
+  // Fetch next player from external API and set as currentPlayer if found in local CSV
+  const handleFetchNextPlayer = async (role: 'Portiere' | 'Difensore' | 'Centrocampista' | 'Attaccante') => {
+    if (!auction || !isBanditore) return;
+    if (auction.isLocked) {
+      alert('Asta bloccata, non è possibile impostare giocatori.');
+      return;
+    }
+
+    const roleNum = roleToNumber(role);
+    // API parameters (hard-coded per ora as provided)
+    const GROUP = '151b462a-d7e6-4449-95e4-94b542f00c81';
+  const LEAGUE = '07ef9475-ba67-4e33-98b3-af4e764a5fc8';
+    const YEAR = '14';
+    const url = `https://apifc.azurewebsites.net/Auction/GetNextPlayer?group=${GROUP}&league=${LEAGUE}&year=${YEAR}&isRandom=true&role=${roleNum}`;
+
+    try {
+      setFetchNextLoading(true);
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`API error ${res.status}`);
+      }
+      const data = await res.json();
+      const apiName = data?.n;
+      if (!apiName) {
+        alert('Risposta API non valida');
+        return;
+      }
+
+      // Find the player in the loaded CSV players
+      const matched = allPlayers.find(p => p.Nome.trim().toLowerCase() === String(apiName).trim().toLowerCase());
+      if (!matched) {
+        alert(`Giocatore restituito dall'API non trovato nel CSV: ${apiName}`);
+        return;
+      }
+
+      // Set the player directly in Firestore
+      await updateDoc(doc(db, 'aste', id!), {
+        currentPlayer: matched.Nome,
+        currentBid: 0,
+        currentBidder: null,
+        isActive: true,
+      });
+
+      // local UI updates
+      setSearchResetCounter(c => c + 1);
+      setCurrentPlayerName('');
+      setShowPlayerDialog(false);
+    } catch (error) {
+      console.error('Errore fetch next player:', error);
+      alert('Errore nel recuperare il prossimo giocatore');
+    } finally {
+      setFetchNextLoading(false);
     }
   };
 
@@ -593,11 +776,11 @@ const AuctionPage: React.FC = () => {
                   </Typography>
                 </Box>
                 <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Button variant="outlined" size="small" onClick={() => { setCurrentRoleView('Tutti'); setShowTakenDialog(true); }}>
-                    Mostra Tutti
-                  </Button>
                   <Button variant="contained" color="primary" size="small" onClick={() => { setCurrentRoleView('Portiere'); setShowTakenDialog(true); }}>
                     Portieri
+                  </Button>
+                   <Button variant="contained" color="primary" size="small" onClick={() => { setCurrentRoleView('Difensore'); setShowTakenDialog(true); }}>
+                    Difensori
                   </Button>
                   <Button variant="contained" color="primary" size="small" onClick={() => { setCurrentRoleView('Centrocampista'); setShowTakenDialog(true); }}>
                     Centrocampisti
@@ -633,26 +816,15 @@ const AuctionPage: React.FC = () => {
             </Typography>
           </Box>
 
-          <TextField
-            fullWidth
-            label="Il tuo nome giocatore"
-            variant="outlined"
-            value={playerName}
-            onChange={(e) => setPlayerName(e.target.value)}
-            sx={{ mb: 2 }}
-            placeholder="Es: Mario Rossi"
-            onKeyPress={(e) => e.key === 'Enter' && handleJoinAsPlayer()}
-          />
-          
           <Button
             fullWidth
             variant="contained"
+            color="primary"
             size="large"
-            onClick={handleJoinAsPlayer}
-            disabled={!playerName.trim()}
-            sx={{ py: 2 }}
+            onClick={signInWithMicrosoft}
+            sx={{ py: 2, mb: 2 }}
           >
-            Unisciti all'Asta
+            Accedi con Microsoft
           </Button>
         </Paper>
       </Container>
@@ -843,7 +1015,7 @@ const AuctionPage: React.FC = () => {
                   variant="contained"
                   size="medium"
                   onClick={() => handleBid(amount)}
-                  disabled={auction?.isLocked || !hasJoined}
+                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer}
                   sx={{ 
                     py: { xs: 1.5, sm: 2 },
                     fontSize: { xs: '0.8rem', sm: '0.9rem' },
@@ -861,7 +1033,7 @@ const AuctionPage: React.FC = () => {
               size="large"
               startIcon={<Euro />}
               onClick={() => setShowCustomDialog(true)}
-              disabled={auction?.isLocked || !hasJoined}
+              disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer}
               sx={{ py: { xs: 1.5, sm: 2 } }}
             >
               Offerta Personalizzata
@@ -906,6 +1078,15 @@ const AuctionPage: React.FC = () => {
                   disabled={auction?.isLocked}
                 >
                   Imposta Giocatore
+                </Button>
+
+                <Button
+                  variant="contained"
+                  startIcon={<SportsEsports />}
+                  onClick={() => handleFetchNextPlayer(currentRoleView)}
+                  disabled={auction?.isLocked}
+                >
+                  {fetchNextLoading ? 'Caricamento...' : 'Dammi il prossimo giocatore'}
                 </Button>
 
                 {auction?.currentPlayer && (
@@ -1009,7 +1190,7 @@ const AuctionPage: React.FC = () => {
           <Button 
             onClick={handleCustomBid} 
             variant="contained"
-            disabled={!customBid || parseInt(customBid) <= (auction?.currentBid || 0)}
+            disabled={!auction?.currentPlayer || !customBid || parseInt(customBid) <= (auction?.currentBid || 0)}
           >
             Conferma Offerta
           </Button>
@@ -1141,7 +1322,7 @@ const AuctionPage: React.FC = () => {
               .map(name => allPlayers.find(p => p.Nome === name))
               .filter(Boolean) as Player[];
 
-            const filtered = currentRoleView === 'Tutti' ? detailed : detailed.filter(p => p.Ruolo === currentRoleView);
+            const filtered = detailed.filter(p => p.Ruolo === currentRoleView);
 
             if (filtered.length === 0) {
               return <Typography color="text.secondary">Nessun giocatore trovato per questo ruolo.</Typography>;
