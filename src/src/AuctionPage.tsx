@@ -26,6 +26,7 @@ import {
   TableRow,
   TableCell,
   TableContainer,
+  Snackbar,
 } from "@mui/material";
 import { 
   SportsEsports, 
@@ -67,7 +68,7 @@ interface AuctionData {
   participants: Participant[];
   takenPlayers?: string[];
   // Optional history of completed sales to show prices for taken players
-  salesHistory?: { playerName: string; price: number; buyer?: string }[];
+  salesHistory?: { playerName: string; price: number; buyer?: string; buyerEmail?: string | null }[];
 }
 
 const AuctionPage: React.FC = () => {
@@ -96,6 +97,60 @@ const AuctionPage: React.FC = () => {
   const [currentRoleView, setCurrentRoleView] = useState<'Portiere' | 'Difensore' | 'Centrocampista' | 'Attaccante'>('Portiere');
   const [searchResetCounter, setSearchResetCounter] = useState(0);
   const [fetchNextLoading, setFetchNextLoading] = useState(false);
+  const [buyerNameCache, setBuyerNameCache] = useState<Record<string, string>>({});
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarMsg, setSnackbarMsg] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState<'error' | 'success'>('error');
+
+  const fetchTeamNameForEmail = async (email: string) => {
+    if (!email) return null;
+    if (buyerNameCache[email]) return buyerNameCache[email];
+    try {
+      const GROUP = '151b462a-d7e6-4449-95e4-94b542f00c81';
+      const BASKET = '4f1d66f3-2564-478a-b07c-e0cf976c2962';
+      const YEAR = '14';
+      const teamApiUrl = `https://apifc.azurewebsites.net/Auction/GetTeamName?group=${GROUP}&basket=${BASKET}&year=${YEAR}&email=${email}`;
+      const teamRes = await fetch(teamApiUrl);
+      if (teamRes.ok) {
+        const contentType = teamRes.headers.get('content-type') || '';
+        let teamName: string | null = null;
+        if (contentType.includes('application/json')) {
+          const tj = await teamRes.json();
+          teamName = tj.teamName || tj.name || (typeof tj === 'string' ? tj : null);
+        } else {
+          const txt = await teamRes.text();
+          teamName = txt && txt.trim() ? txt.trim() : null;
+        }
+        if (teamName) {
+          setBuyerNameCache(prev => ({ ...prev, [email]: teamName }));
+          return teamName;
+        }
+      }
+    } catch (err) {
+      console.error('Errore fetching team name for email', err);
+    }
+    return null;
+  };
+
+  const resolveBuyerDisplay = (label?: string | null) => {
+    if (!label) return 'Base';
+    // Prefer participant record
+    const pList = auction?.participants || [];
+    const byName = pList.find(p => p.name === label);
+    if (byName) return byName.name;
+    const byEmail = pList.find(p => p.email === label);
+    if (byEmail) return byEmail.name;
+    // If it's an email try cached team name or fetch in background
+    if (/@/.test(label)) {
+      const cached = buyerNameCache[label];
+      if (cached) return cached;
+      // kick off background fetch to populate cache
+      fetchTeamNameForEmail(label).catch(() => {});
+      // temporary fallback to a neutral placeholder while we resolve
+      return 'Caricamento...';
+    }
+    return label;
+  };
 
   // Recupera i dati salvati al caricamento
   useEffect(() => {
@@ -226,7 +281,7 @@ const AuctionPage: React.FC = () => {
       // Try to retrieve team name from your API using the logged email.
       // Assumption: use the same GROUP and LEAGUE/BASKET constants used elsewhere in the app.
       const GROUP = '151b462a-d7e6-4449-95e4-94b542f00c81';
-      const BASKET = '07ef9475-ba67-4e33-98b3-af4e764a5fc8';
+      const BASKET = '4f1d66f3-2564-478a-b07c-e0cf976c2962';
       const YEAR = '14';
       const teamApiUrl = `https://apifc.azurewebsites.net/Auction/GetTeamName?group=${GROUP}&basket=${BASKET}&year=${YEAR}&email=${email}`;
       let teamName: string | null = null;
@@ -406,7 +461,7 @@ const AuctionPage: React.FC = () => {
     const roleNum = roleToNumber(role);
     // API parameters (hard-coded per ora as provided)
     const GROUP = '151b462a-d7e6-4449-95e4-94b542f00c81';
-  const LEAGUE = '07ef9475-ba67-4e33-98b3-af4e764a5fc8';
+    const LEAGUE = '07ef9475-ba67-4e33-98b3-af4e764a5fc8';
     const YEAR = '14';
     const url = `https://apifc.azurewebsites.net/Auction/GetNextPlayer?group=${GROUP}&league=${LEAGUE}&year=${YEAR}&isRandom=true&role=${roleNum}`;
 
@@ -463,7 +518,7 @@ const AuctionPage: React.FC = () => {
       if (!currentTakenPlayers.includes(playerName)) {
         await updateDoc(doc(db, "aste", id!), {
           takenPlayers: arrayUnion(playerName),
-          salesHistory: arrayUnion({ playerName, price: 0, buyer: 'Banditore' })
+          salesHistory: arrayUnion({ playerName, price: 0, buyer: 'Banditore', buyerEmail: null })
         });
       }
     } catch (error) {
@@ -473,18 +528,92 @@ const AuctionPage: React.FC = () => {
 
   const handlePlayerSold = async () => {
     if (!auction?.currentPlayer || !isBanditore) return;
-    
+
+    // Resolve buyer email by matching currentBidder with participants
+    let buyerEmail: string | null = null;
+    const bidderLabel = auction.currentBidder || 'Base';
+    if (bidderLabel && bidderLabel !== 'Banditore' && bidderLabel !== 'Base') {
+      const matchedParticipant = auction.participants?.find(p => p.name === bidderLabel);
+      if (matchedParticipant && (matchedParticipant as any).email) {
+        buyerEmail = (matchedParticipant as any).email;
+      } else {
+        if (/@/.test(bidderLabel)) buyerEmail = bidderLabel;
+      }
+    }
+
+    if (!buyerEmail) {
+      setSnackbarSeverity('error');
+      setSnackbarMsg("Impossibile determinare l'email del compratore; operazione annullata.");
+      setSnackbarOpen(true);
+      return;
+    }
+
+    // Call external API to assign player to team by email FIRST; if it fails, abort and show error
     try {
-      await updateDoc(doc(db, "aste", id!), {
-        takenPlayers: arrayUnion(auction.currentPlayer),
-        currentPlayer: null,
-        currentBid: 0,
-        currentBidder: null,
-        isActive: false,
-        salesHistory: arrayUnion({ playerName: auction.currentPlayer, price: auction.currentBid, buyer: auction.currentBidder || 'Base' })
-      });
-    } catch (error) {
-      console.error("Errore nel completare la vendita:", error);
+      const GROUP = '151b462a-d7e6-4449-95e4-94b542f00c81';
+      const LEAGUE = '07ef9475-ba67-4e33-98b3-af4e764a5fc8';
+      const BASKET = '4f1d66f3-2564-478a-b07c-e0cf976c2962';
+      const YEAR = '14';
+      const playerName = encodeURIComponent(auction.currentPlayer);
+      const price = auction.currentBid || 0;
+      const emailToSend = encodeURIComponent(buyerEmail);
+      const apiUrl = `https://apifc.azurewebsites.net/Auction/SetPlayer?email=${emailToSend}&group=${GROUP}&league=${LEAGUE}&basket=${BASKET}&year=${YEAR}&playerName=${playerName}&price=${price}&isRandom=false`;
+
+      const resp = await fetch(apiUrl);
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => resp.statusText || 'Errore API');
+        setSnackbarSeverity('error');
+        setSnackbarMsg(`SetPlayer API error: ${text}`);
+        setSnackbarOpen(true);
+        return;
+      }
+
+      // API returns boolean; ensure it's true if possible
+      let okResult = true;
+      try {
+        const bodyText = await resp.text();
+        const trimmed = bodyText.trim();
+        if (trimmed.length > 0) {
+          if (trimmed === 'false' || trimmed === 'False' || trimmed === '0') okResult = false;
+        }
+      } catch (e) {
+        // ignore parsing issues, assume OK if status was ok
+      }
+
+      if (!okResult) {
+        setSnackbarSeverity('error');
+        setSnackbarMsg('SetPlayer API returned false; operazione annullata.');
+        setSnackbarOpen(true);
+        return;
+      }
+
+      // If API succeeded, update Firestore
+      try {
+        await updateDoc(doc(db, "aste", id!), {
+          takenPlayers: arrayUnion(auction.currentPlayer),
+          currentPlayer: null,
+          currentBid: 0,
+          currentBidder: null,
+          isActive: false,
+          salesHistory: arrayUnion({ playerName: auction.currentPlayer, price: auction.currentBid, buyer: bidderLabel, buyerEmail: buyerEmail || null })
+        });
+
+        setSnackbarSeverity('success');
+        setSnackbarMsg('Giocatore assegnato correttamente');
+        setSnackbarOpen(true);
+      } catch (error) {
+        console.error("Errore nel completare la vendita su Firestore:", error);
+        setSnackbarSeverity('error');
+        setSnackbarMsg('Errore nel salvare la vendita localmente.');
+        setSnackbarOpen(true);
+      }
+
+    } catch (apiErr) {
+      console.error('Errore calling SetPlayer API', apiErr);
+      setSnackbarSeverity('error');
+      setSnackbarMsg('Errore nella chiamata alla API SetPlayer. Operazione annullata.');
+      setSnackbarOpen(true);
+      return;
     }
   };
 
@@ -659,7 +788,7 @@ const AuctionPage: React.FC = () => {
                   </Typography>
                   {auction.currentBidder && (
                     <Typography variant="h5" sx={{ mt: 2, opacity: 0.9 }}>
-                      di {auction.currentBidder}
+                      di {resolveBuyerDisplay(auction.currentBidder)}
                     </Typography>
                   )}
                 </Box>
@@ -927,7 +1056,7 @@ const AuctionPage: React.FC = () => {
                   </Typography>
                   {auction.currentBidder && (
                     <Typography variant="body2" color="text.secondary">
-                      di {auction.currentBidder}
+                      di {resolveBuyerDisplay(auction.currentBidder)}
                     </Typography>
                   )}
                 </Box>
@@ -1097,7 +1226,7 @@ const AuctionPage: React.FC = () => {
                     onClick={handlePlayerSold}
                     disabled={auction?.isLocked}
                   >
-                    Aggiudica a {auction.currentBidder || 'Base'} - €{auction.currentBid}
+                    Aggiudica a {resolveBuyerDisplay(auction.currentBidder) || 'Base'} - €{auction.currentBid}
                   </Button>
                 )}
                 
@@ -1349,7 +1478,7 @@ const AuctionPage: React.FC = () => {
                           <TableCell>{p.Ruolo}</TableCell>
                           <TableCell>{p.Squadra}</TableCell>
                           <TableCell>{matching ? `€${matching.price}` : '—'}</TableCell>
-                          <TableCell>{matching ? matching.buyer || '—' : '—'}</TableCell>
+                          <TableCell>{matching ? (matching.buyerEmail ? (buyerNameCache[matching.buyerEmail] || matching.buyer) : (matching.buyer || '—')) : '—'}</TableCell>
                         </TableRow>
                       );
                     })}
@@ -1386,8 +1515,19 @@ const AuctionPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={6000}
+        onClose={() => setSnackbarOpen(false)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setSnackbarOpen(false)} severity={snackbarSeverity} sx={{ width: '100%' }}>
+          {snackbarMsg}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 };
 
 export default AuctionPage;
+

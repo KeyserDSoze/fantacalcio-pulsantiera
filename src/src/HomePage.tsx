@@ -143,7 +143,7 @@ const HomePage: React.FC = () => {
             </Alert>
             
             {/* Sezione Partecipanti */}
-            <Box sx={{ mb: 3, p: 3, backgroundColor: 'primary.light', borderRadius: 2, border: '1px solid', borderColor: 'primary.main', opacity: 0.1 }}>
+            <Box sx={{ mb: 3, p: 3, backgroundColor: 'primary.light', borderRadius: 2, border: '1px solid', borderColor: 'primary.main' }}>
               <Box sx={{ backgroundColor: 'background.paper', p: 3, borderRadius: 1 }}>
                 <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   👥 Link per Partecipanti
