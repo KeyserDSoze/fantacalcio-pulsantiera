@@ -46,6 +46,8 @@ import {
 } from "@mui/icons-material";
 import PlayerSearch from "./components/PlayerSearch";
 import msalInstance, { loginRequest } from './msal';
+import fantacalcioApi from './services/fantacalcioApi';
+import type { TeamInfo } from './services/fantacalcioApi';
 import { alpha } from '@mui/material/styles';
 import type { Player } from "./types/Player";
 import { loadPlayersData } from "./services/playersService";
@@ -101,30 +103,35 @@ const AuctionPage: React.FC = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMsg, setSnackbarMsg] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'error' | 'success'>('error');
+  // Teams panel state
+  const [teams, setTeams] = useState<TeamInfo[] | null>(null);
+  const [teamsLoading, setTeamsLoading] = useState(false);
+  const [teamsError, setTeamsError] = useState<string | null>(null);
+
+  const DEFAULT_TEAM_BUDGET = 1000; // assumiamo budget iniziale se non fornito
+
+  const refreshTeams = async () => {
+    setTeamsLoading(true);
+    setTeamsError(null);
+    try {
+      const t = await fantacalcioApi.getTeams();
+      setTeams(t);
+    } catch (err: any) {
+      console.error('Errore getTeams', err);
+      setTeamsError(String(err?.message || err));
+    } finally {
+      setTeamsLoading(false);
+    }
+  };
 
   const fetchTeamNameForEmail = async (email: string) => {
     if (!email) return null;
     if (buyerNameCache[email]) return buyerNameCache[email];
     try {
-      const GROUP = '151b462a-d7e6-4449-95e4-94b542f00c81';
-      const BASKET = '4f1d66f3-2564-478a-b07c-e0cf976c2962';
-      const YEAR = '14';
-      const teamApiUrl = `https://apifc.azurewebsites.net/Auction/GetTeamName?group=${GROUP}&basket=${BASKET}&year=${YEAR}&email=${email}`;
-      const teamRes = await fetch(teamApiUrl);
-      if (teamRes.ok) {
-        const contentType = teamRes.headers.get('content-type') || '';
-        let teamName: string | null = null;
-        if (contentType.includes('application/json')) {
-          const tj = await teamRes.json();
-          teamName = tj.teamName || tj.name || (typeof tj === 'string' ? tj : null);
-        } else {
-          const txt = await teamRes.text();
-          teamName = txt && txt.trim() ? txt.trim() : null;
-        }
-        if (teamName) {
-          setBuyerNameCache(prev => ({ ...prev, [email]: teamName }));
-          return teamName;
-        }
+      const teamName = await fantacalcioApi.getTeamName(email);
+      if (teamName) {
+        setBuyerNameCache(prev => ({ ...prev, [email]: teamName }));
+        return teamName;
       }
     } catch (err) {
       console.error('Errore fetching team name for email', err);
@@ -278,29 +285,10 @@ const AuctionPage: React.FC = () => {
 
       setPlayerEmail(email);
 
-      // Try to retrieve team name from your API using the logged email.
-      // Assumption: use the same GROUP and LEAGUE/BASKET constants used elsewhere in the app.
-      const GROUP = '151b462a-d7e6-4449-95e4-94b542f00c81';
-      const BASKET = '4f1d66f3-2564-478a-b07c-e0cf976c2962';
-      const YEAR = '14';
-      const teamApiUrl = `https://apifc.azurewebsites.net/Auction/GetTeamName?group=${GROUP}&basket=${BASKET}&year=${YEAR}&email=${email}`;
+      // Try to retrieve team name from your API using the logged email via service
       let teamName: string | null = null;
       try {
-        const teamRes = await fetch(teamApiUrl);
-        if (teamRes.ok) {
-          // API may return JSON or plain text. Try JSON then fallback to text.
-          const contentType = teamRes.headers.get('content-type') || '';
-          if (contentType.includes('application/json')) {
-            const tj = await teamRes.json();
-            // try common keys
-            teamName = tj.teamName || tj.name || tj || null;
-          } else {
-            const txt = await teamRes.text();
-            teamName = txt && txt.trim() ? txt.trim() : null;
-          }
-        } else {
-          console.warn('Team API returned non-ok', teamRes.status);
-        }
+        teamName = await fantacalcioApi.getTeamName(email);
       } catch (teamErr) {
         console.error('Team API error', teamErr);
       }
@@ -334,6 +322,12 @@ const AuctionPage: React.FC = () => {
       setCurrentPlayerData(null);
     }
   }, [auction?.currentPlayer, allPlayers]);
+
+  // Load teams for the teams panel
+  useEffect(() => {
+    refreshTeams();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const handleJoinAsPlayer = async () => {
     if (!playerName.trim() || !auction) return;
@@ -459,19 +453,10 @@ const AuctionPage: React.FC = () => {
     }
 
     const roleNum = roleToNumber(role);
-    // API parameters (hard-coded per ora as provided)
-    const GROUP = '151b462a-d7e6-4449-95e4-94b542f00c81';
-    const LEAGUE = '07ef9475-ba67-4e33-98b3-af4e764a5fc8';
-    const YEAR = '14';
-    const url = `https://apifc.azurewebsites.net/Auction/GetNextPlayer?group=${GROUP}&league=${LEAGUE}&year=${YEAR}&isRandom=true&role=${roleNum}`;
 
     try {
       setFetchNextLoading(true);
-      const res = await fetch(url);
-      if (!res.ok) {
-        throw new Error(`API error ${res.status}`);
-      }
-      const data = await res.json();
+      const data = await fantacalcioApi.getNextPlayer(roleNum, true);
       const apiName = data?.n;
       if (!apiName) {
         alert('Risposta API non valida');
@@ -548,39 +533,10 @@ const AuctionPage: React.FC = () => {
       return;
     }
 
-    // Call external API to assign player to team by email FIRST; if it fails, abort and show error
+    // Call external API to assign player to team by email FIRST via service; if it fails, abort and show error
     try {
-      const GROUP = '151b462a-d7e6-4449-95e4-94b542f00c81';
-      const LEAGUE = '07ef9475-ba67-4e33-98b3-af4e764a5fc8';
-      const BASKET = '4f1d66f3-2564-478a-b07c-e0cf976c2962';
-      const YEAR = '14';
-      const playerName = encodeURIComponent(auction.currentPlayer);
-      const price = auction.currentBid || 0;
-      const emailToSend = encodeURIComponent(buyerEmail);
-      const apiUrl = `https://apifc.azurewebsites.net/Auction/SetPlayer?email=${emailToSend}&group=${GROUP}&league=${LEAGUE}&basket=${BASKET}&year=${YEAR}&playerName=${playerName}&price=${price}&isRandom=false`;
-
-      const resp = await fetch(apiUrl);
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => resp.statusText || 'Errore API');
-        setSnackbarSeverity('error');
-        setSnackbarMsg(`SetPlayer API error: ${text}`);
-        setSnackbarOpen(true);
-        return;
-      }
-
-      // API returns boolean; ensure it's true if possible
-      let okResult = true;
-      try {
-        const bodyText = await resp.text();
-        const trimmed = bodyText.trim();
-        if (trimmed.length > 0) {
-          if (trimmed === 'false' || trimmed === 'False' || trimmed === '0') okResult = false;
-        }
-      } catch (e) {
-        // ignore parsing issues, assume OK if status was ok
-      }
-
-      if (!okResult) {
+      const ok = await fantacalcioApi.setPlayer(buyerEmail, auction.currentPlayer || '', auction.currentBid || 0, false);
+      if (!ok) {
         setSnackbarSeverity('error');
         setSnackbarMsg('SetPlayer API returned false; operazione annullata.');
         setSnackbarOpen(true);
@@ -607,11 +563,10 @@ const AuctionPage: React.FC = () => {
         setSnackbarMsg('Errore nel salvare la vendita localmente.');
         setSnackbarOpen(true);
       }
-
-    } catch (apiErr) {
-      console.error('Errore calling SetPlayer API', apiErr);
+    } catch (err: any) {
+      console.error('Errore calling SetPlayer API', err);
       setSnackbarSeverity('error');
-      setSnackbarMsg('Errore nella chiamata alla API SetPlayer. Operazione annullata.');
+      setSnackbarMsg(`SetPlayer API error: ${err?.message || String(err)}`);
       setSnackbarOpen(true);
       return;
     }
@@ -1168,6 +1123,56 @@ const AuctionPage: React.FC = () => {
               Offerta Personalizzata
             </Button>
           </Paper>
+
+          {/* Teams Panel (Banditore) */}
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="subtitle1" gutterBottom>Stato Squadre</Typography>
+              {teamsLoading ? (
+                <Box display="flex" justifyContent="center" alignItems="center" py={2}><CircularProgress size={24} /></Box>
+              ) : teamsError ? (
+                <Alert severity="error">Errore caricamento squadre: {teamsError}</Alert>
+              ) : teams && teams.length > 0 ? (
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(1,1fr)', sm: 'repeat(2,1fr)', md: 'repeat(3,1fr)', lg: 'repeat(4,1fr)' }, gap: 2 }}>
+                  {(
+                    [...teams].map(t => ({
+                      team: t,
+                      spent: typeof t.cost === 'number' ? t.cost : 0,
+                    }))
+                    .map(x => ({ ...x, remaining: DEFAULT_TEAM_BUDGET - x.spent }))
+                    .sort((a, b) => (b.remaining - a.remaining))
+                  ).map((entry, idx) => {
+                    const t = entry.team;
+                    const remaining = entry.remaining;
+                    const roleCounts = (t.players || []).reduce((acc, p) => {
+                      const r = p.role || 0;
+                      if (r === 0) acc.gk++;
+                      else if (r === 1) acc.def++;
+                      else if (r === 2) acc.mid++;
+                      else if (r === 3) acc.att++;
+                      return acc;
+                    }, { gk: 0, def: 0, mid: 0, att: 0 });
+
+                    return (
+                      <Paper key={t.owner || t.name || idx} elevation={1} sx={{ p: 2 }}>
+                        <Typography variant="subtitle2" fontWeight="bold">{t.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">{t.owner || '—'}</Typography>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
+                          <Typography variant="h6">€{remaining}</Typography>
+                        </Box>
+                        <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
+                          <Chip label={`P: ${roleCounts.gk}`} size="small" />
+                          <Chip label={`D: ${roleCounts.def}`} size="small" />
+                          <Chip label={`C: ${roleCounts.mid}`} size="small" />
+                          <Chip label={`A: ${roleCounts.att}`} size="small" />
+                        </Box>
+                      </Paper>
+                    );
+                  })}
+                </Box>
+              ) : (
+                <Typography variant="body2" color="text.secondary">Nessuna informazione sulle squadre disponibile.</Typography>
+              )}
+            </Box>
         </Box>
 
         {/* Pannello Banditore */}
@@ -1277,6 +1282,8 @@ const AuctionPage: React.FC = () => {
                 </Typography>
               )}
             </Paper>
+
+            
           </Box>
         )}
       </Box>

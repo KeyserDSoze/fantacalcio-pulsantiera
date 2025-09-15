@@ -4,6 +4,7 @@ import { ThemeProvider, createTheme } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import HomePage from "./HomePage";
 import AuctionPage from "./AuctionPage";
+import TeamsPage from "./TeamsPage";
 
 const theme = createTheme({
   palette: {
@@ -24,6 +25,7 @@ const App: React.FC = () => {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/asta/:id" element={<AuctionPage />} />
+          <Route path="/teams" element={<TeamsPage />} />
         </Routes>
       </Router>
     </ThemeProvider>
