@@ -1206,15 +1206,6 @@ const AuctionPage: React.FC = () => {
                 </Button>
                 
                 <Button
-                  variant="outlined"
-                  startIcon={<PlayArrow />}
-                  onClick={() => setShowPlayerDialog(true)}
-                  disabled={auction?.isLocked}
-                >
-                  Imposta Giocatore
-                </Button>
-
-                <Button
                   variant="contained"
                   startIcon={<SportsEsports />}
                   onClick={() => handleFetchNextPlayer(currentRoleView)}
