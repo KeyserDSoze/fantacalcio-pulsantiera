@@ -110,6 +110,14 @@ const AuctionPage: React.FC = () => {
 
   const DEFAULT_TEAM_BUDGET = 1000; // assumiamo budget iniziale se non fornito
 
+  // Limiti ruoli per squadra
+  const ROLE_LIMITS = {
+    'Portiere': 3,
+    'Difensore': 8,
+    'Centrocampista': 8,
+    'Attaccante': 6
+  } as const;
+
   // Funzione per convertire StatPlayer a Player
   const convertStatPlayerToPlayer = (statPlayer: StatPlayer): Player => {
     // Conversione ruolo da numero a stringa
@@ -145,6 +153,40 @@ const AuctionPage: React.FC = () => {
       Attivo: statPlayer.isActive,
       isTaken: false, // Da determinare in base a takenPlayers
     };
+  };
+
+  // Funzione per ottenere il team dell'utente corrente
+  const getCurrentUserTeam = () => {
+    if (!teams || !playerEmail) return null;
+    return teams.find(team => team.owner === playerEmail);
+  };
+
+  // Funzione per controllare se un utente può prendere un giocatore di un determinato ruolo
+  const canUserTakePlayerRole = (userEmail: string, playerRole: 'Portiere' | 'Difensore' | 'Centrocampista' | 'Attaccante') => {
+    if (!teams) return true; // Se non abbiamo i dati dei team, permettiamo l'offerta
+    
+    const userTeam = teams.find(team => team.owner === userEmail);
+    if (!userTeam) return true; // Se non troviamo il team, permettiamo l'offerta
+    
+    // Conta i giocatori per ruolo nel team
+    const roleCount = (userTeam.players || []).filter(player => {
+      switch (player.role) {
+        case 0: return playerRole === 'Portiere';
+        case 1: return playerRole === 'Difensore';
+        case 2: return playerRole === 'Centrocampista';
+        case 3: return playerRole === 'Attaccante';
+        default: return false;
+      }
+    }).length;
+    
+    return roleCount < ROLE_LIMITS[playerRole];
+  };
+
+  // Funzione per controllare se l'utente può fare offerte per il giocatore corrente
+  const canUserBidOnCurrentPlayer = () => {
+    if (!currentPlayerData || !playerEmail || !teams) return true; // Fallback: permetti l'offerta
+    
+    return canUserTakePlayerRole(playerEmail, currentPlayerData.Ruolo);
   };
 
   const refreshTeams = async () => {
@@ -434,6 +476,26 @@ const AuctionPage: React.FC = () => {
   // Also prevent bidding when in display view or when the current user is the banditore
   if (!auction || !hasJoined || auction.isLocked || !auction.currentPlayer || isDisplayView || isBanditore) return;
     
+    // Controllo limite ruoli - verifica se l'utente può prendere questo giocatore
+    if (playerEmail && currentPlayerData) {
+      const canTake = canUserTakePlayerRole(playerEmail, currentPlayerData.Ruolo);
+      if (!canTake) {
+        const currentCount = getCurrentUserTeam()?.players?.filter(p => {
+          switch (p.role) {
+            case 0: return currentPlayerData.Ruolo === 'Portiere';
+            case 1: return currentPlayerData.Ruolo === 'Difensore';
+            case 2: return currentPlayerData.Ruolo === 'Centrocampista';
+            case 3: return currentPlayerData.Ruolo === 'Attaccante';
+            default: return false;
+          }
+        }).length || 0;
+        
+        const limit = ROLE_LIMITS[currentPlayerData.Ruolo];
+        alert(`Non puoi prendere altri ${currentPlayerData.Ruolo.toLowerCase()}! Hai già ${currentCount}/${limit} giocatori per questo ruolo.`);
+        return;
+      }
+    }
+
     const newBid = auction.currentBid + amount;
     const bidderName = isBanditore ? "Banditore" : playerName.trim();
     
@@ -454,6 +516,26 @@ const AuctionPage: React.FC = () => {
   if (!auction || auction.isLocked || !hasJoined || !auction.currentPlayer || isDisplayView || isBanditore) {
       alert("Non ci sono giocatori in asta o non puoi fare offerte");
       return;
+    }
+
+    // Controllo limite ruoli - stesso controllo di handleBid
+    if (playerEmail && currentPlayerData) {
+      const canTake = canUserTakePlayerRole(playerEmail, currentPlayerData.Ruolo);
+      if (!canTake) {
+        const currentCount = getCurrentUserTeam()?.players?.filter(p => {
+          switch (p.role) {
+            case 0: return currentPlayerData.Ruolo === 'Portiere';
+            case 1: return currentPlayerData.Ruolo === 'Difensore';
+            case 2: return currentPlayerData.Ruolo === 'Centrocampista';
+            case 3: return currentPlayerData.Ruolo === 'Attaccante';
+            default: return false;
+          }
+        }).length || 0;
+        
+        const limit = ROLE_LIMITS[currentPlayerData.Ruolo];
+        alert(`Non puoi prendere altri ${currentPlayerData.Ruolo.toLowerCase()}! Hai già ${currentCount}/${limit} giocatori per questo ruolo.`);
+        return;
+      }
     }
 
     const amount = parseInt(customBid);
@@ -952,6 +1034,13 @@ const AuctionPage: React.FC = () => {
               Fai la tua offerta:
             </Typography>
             
+            {/* Messaggio quando non si può fare offerta per limite ruolo */}
+            {currentPlayerData && !canUserBidOnCurrentPlayer() && (
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                Non puoi fare offerte per questo {currentPlayerData.Ruolo.toLowerCase()} - hai già raggiunto il limite di ruolo!
+              </Alert>
+            )}
+            
            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(2, 1fr)' }, gap: 1, mb: 2 }}>
               {[1, 3].map((amount) => (
                 <Button
@@ -959,7 +1048,7 @@ const AuctionPage: React.FC = () => {
                   variant="contained"
                   size="medium"
                   onClick={() => handleBid(amount)}
-                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer}
+                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer()}
                   sx={{ 
                     py: { xs: 1.5, sm: 2 },
                     fontSize: { xs: '1.8rem', sm: '1.9rem' },
@@ -978,7 +1067,7 @@ const AuctionPage: React.FC = () => {
                   variant="contained"
                   size="medium"
                   onClick={() => handleBid(amount)}
-                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer}
+                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer()}
                   sx={{ 
                     py: { xs: 1.5, sm: 2 },
                     fontSize: { xs: '0.8rem', sm: '0.9rem' },
@@ -996,7 +1085,7 @@ const AuctionPage: React.FC = () => {
               size="large"
               startIcon={<Euro />}
               onClick={() => setShowCustomDialog(true)}
-              disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer}
+              disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer()}
               sx={{ py: { xs: 1.5, sm: 2 } }}
             >
               Offerta Personalizzata
@@ -1041,26 +1130,53 @@ const AuctionPage: React.FC = () => {
                       return acc;
                     }, { gk: 0, def: 0, mid: 0, att: 0 });
 
+                    // Controlla se questo è il team dell'utente corrente
+                    const isCurrentUserTeam = playerEmail && t.owner === playerEmail;
+
                     return (
                       <Paper 
                         key={t.owner || t.name || idx} 
-                        elevation={1} 
+                        elevation={isCurrentUserTeam ? 3 : 1} 
                         sx={{ 
                           p: 2,
                           backgroundColor: teamsRefreshing ? 'primary.light' : 'background.paper',
                           transition: 'background-color 0.3s ease-in-out, transform 0.3s ease-in-out',
+                          border: isCurrentUserTeam ? '2px solid' : 'none',
+                          borderColor: isCurrentUserTeam ? 'primary.main' : 'transparent',
                         }}
                       >
-                        <Typography variant="subtitle2" fontWeight="bold">{t.name}</Typography>
+                        <Typography variant="subtitle2" fontWeight="bold">
+                          {t.name} {isCurrentUserTeam && '(Tu)'}
+                        </Typography>
                         <Typography variant="caption" color="text.secondary">{t.owner || '—'}</Typography>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
                           <Typography variant="h6">€{remaining}</Typography>
                         </Box>
                         <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
-                          <Chip label={`P: ${roleCounts.gk}`} size="small" color="warning" />
-                          <Chip label={`D: ${roleCounts.def}`} size="small" color="primary" />
-                          <Chip label={`C: ${roleCounts.mid}`} size="small" color="success" />
-                          <Chip label={`A: ${roleCounts.att}`} size="small" color="error" />
+                          <Chip 
+                            label={`P: ${roleCounts.gk}/${ROLE_LIMITS.Portiere}`} 
+                            size="small" 
+                            color="warning" 
+                            variant={roleCounts.gk >= ROLE_LIMITS.Portiere ? "filled" : "outlined"}
+                          />
+                          <Chip 
+                            label={`D: ${roleCounts.def}/${ROLE_LIMITS.Difensore}`} 
+                            size="small" 
+                            color="primary" 
+                            variant={roleCounts.def >= ROLE_LIMITS.Difensore ? "filled" : "outlined"}
+                          />
+                          <Chip 
+                            label={`C: ${roleCounts.mid}/${ROLE_LIMITS.Centrocampista}`} 
+                            size="small" 
+                            color="success" 
+                            variant={roleCounts.mid >= ROLE_LIMITS.Centrocampista ? "filled" : "outlined"}
+                          />
+                          <Chip 
+                            label={`A: ${roleCounts.att}/${ROLE_LIMITS.Attaccante}`} 
+                            size="small" 
+                            color="error" 
+                            variant={roleCounts.att >= ROLE_LIMITS.Attaccante ? "filled" : "outlined"}
+                          />
                         </Box>
                       </Paper>
                     );
