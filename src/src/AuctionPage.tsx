@@ -169,7 +169,7 @@ const AuctionPage: React.FC = () => {
   // Funzione per ottenere il team dell'utente corrente
   const getCurrentUserTeam = () => {
     if (!teams || !playerEmail) return null;
-    return teams.find(team => team.owner === playerEmail);
+    return teams.find(team => team.owner?.toLowerCase() === playerEmail.toLowerCase());
   };
 
   // Funzione per verificare se l'utente ha un team valido
@@ -178,14 +178,14 @@ const AuctionPage: React.FC = () => {
     if (isBanditore) return true;
     
     if (!playerEmail || !teams) return false;
-    return teams.some(team => team.owner === playerEmail);
+    return teams.some(team => team.owner?.toLowerCase() === playerEmail.toLowerCase());
   };
 
   // Funzione per controllare se un utente può prendere un giocatore di un determinato ruolo
   const canUserTakePlayerRole = (userEmail: string, playerRole: 'Portiere' | 'Difensore' | 'Centrocampista' | 'Attaccante') => {
     if (!teams) return true; // Se non abbiamo i dati dei team, permettiamo l'offerta
     
-    const userTeam = teams.find(team => team.owner === userEmail);
+    const userTeam = teams.find(team => team.owner?.toLowerCase() === userEmail.toLowerCase());
     if (!userTeam) return true; // Se non troviamo il team, permettiamo l'offerta
     
     // Conta i giocatori per ruolo nel team
@@ -1427,7 +1427,7 @@ const AuctionPage: React.FC = () => {
                     }, { gk: 0, def: 0, mid: 0, att: 0 });
 
                     // Controlla se questo è il team dell'utente corrente
-                    const isCurrentUserTeam = playerEmail && t.owner === playerEmail;
+                    const isCurrentUserTeam = playerEmail && t.owner?.toLowerCase() === playerEmail.toLowerCase();
 
                     return (
                       <Paper 
