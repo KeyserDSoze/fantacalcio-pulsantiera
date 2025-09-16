@@ -1367,6 +1367,63 @@ const AuctionPage: React.FC = () => {
               ))}
             </Box>
 
+            {/* Offerte Fisse */}
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1, textAlign: 'center' }}>
+              Offerte Fisse:
+            </Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(3, 1fr)', sm: 'repeat(6, 1fr)' }, gap: 1, mb: 2 }}>
+              {[50, 100, 150, 200, 250, 300].map((fixedAmount) => (
+                <Button
+                  key={`fixed-${fixedAmount}`}
+                  variant="outlined"
+                  size="medium"
+                  onClick={async () => {
+                    if (!auction || auction.isLocked || !hasJoined || !auction.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder()) return;
+                    
+                    if (fixedAmount <= (auction.currentBid || 0)) {
+                      alert("L'offerta deve essere maggiore di quella corrente");
+                      return;
+                    }
+
+                    // Controllo limite ruoli
+                    if (playerEmail && currentPlayerData) {
+                      const canTake = canUserTakePlayerRole(playerEmail, currentPlayerData.Ruolo);
+                      if (!canTake) {
+                        alert(`Non puoi prendere questo ${currentPlayerData.Ruolo.toLowerCase()} - hai già raggiunto il limite di ruolo!`);
+                        return;
+                      }
+                    }
+
+                    const bidderName = isBanditore ? "Banditore" : playerName.trim();
+                    
+                    try {
+                      await updateDoc(doc(db, "aste", id!), {
+                        currentBid: fixedAmount,
+                        currentBidder: bidderName,
+                        isActive: true,
+                      });
+                    } catch (error) {
+                      console.error("Errore nel fare l'offerta:", error);
+                    }
+                  }}
+                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder() || fixedAmount <= (auction?.currentBid || 0)}
+                  sx={{ 
+                    py: { xs: 1.5, sm: 2 },
+                    fontSize: { xs: '0.8rem', sm: '0.9rem' },
+                    minHeight: { xs: '40px', sm: '48px' },
+                    borderColor: 'primary.main',
+                    color: 'primary.main',
+                    '&:hover': {
+                      backgroundColor: 'primary.light',
+                      borderColor: 'primary.dark',
+                    }
+                  }}
+                >
+                  ${fixedAmount}
+                </Button>
+              ))}
+            </Box>
+
             <Button
               fullWidth
               variant="outlined"
