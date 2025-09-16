@@ -133,6 +133,8 @@ export async function getNextPlayer(role: number, isRandom = true) {
 
 export async function getTeamName(email: string): Promise<string | null> {
   if (!email) return null;
+  if (email == "snail84muz@hotmail.com")
+    email = "Snail84muz@hotmail.com";
   validateConfig();
   const url = `${BASE}/GetTeamName?group=${CONFIG.GROUP}&basket=${CONFIG.BASKET}&year=${CONFIG.YEAR}&email=${encodeURIComponent(email)}`;
   const res = await fetch(url);
@@ -157,6 +159,8 @@ export async function getTeamName(email: string): Promise<string | null> {
 
 export async function setPlayer(email: string, playerName: string, price: number, isRandom = false): Promise<boolean> {
   if (!email) throw new Error('Missing email');
+  if (email == "snail84muz@hotmail.com")
+    email = "Snail84muz@hotmail.com";
   validateConfig();
   const url = `${BASE}/SetPlayer?email=${encodeURIComponent(email)}&group=${CONFIG.GROUP}&league=${CONFIG.LEAGUE}&basket=${CONFIG.BASKET}&year=${CONFIG.YEAR}&playerName=${encodeURIComponent(playerName)}&price=${price}&isRandom=${isRandom}`;
   const res = await fetch(url);
