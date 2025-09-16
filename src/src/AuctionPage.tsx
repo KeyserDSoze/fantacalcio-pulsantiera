@@ -47,6 +47,7 @@ import PlayerSearch from "./components/PlayerSearch";
 import msalInstance, { loginRequest } from './msal';
 import fantacalcioApi, { updateConfig } from './services/fantacalcioApi';
 import type { TeamInfo, StatPlayer } from './services/fantacalcioApi';
+import { csvDataService, type PlayerEnhancedData } from './services/csvDataService';
 import { alpha } from '@mui/material/styles';
 import type { Player } from "./types/Player";
 
@@ -110,6 +111,7 @@ const AuctionPage: React.FC = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMsg, setSnackbarMsg] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'error' | 'success'>('error');
+  const [currentPlayerEnhanced, setCurrentPlayerEnhanced] = useState<PlayerEnhancedData | null>(null);
   // Teams panel state
   const [teams, setTeams] = useState<TeamInfo[] | null>(null);
   const [teamsLoading, setTeamsLoading] = useState(false);
@@ -455,6 +457,46 @@ const AuctionPage: React.FC = () => {
       setCurrentPlayerData(null);
     }
   }, [auction?.currentPlayer, allPlayers]);
+
+  // Inizializza il servizio CSV
+  useEffect(() => {
+    const initCSVService = async () => {
+      try {
+        await csvDataService.initialize();
+        console.log('CSV Data Service initialized');
+      } catch (error) {
+        console.error('Failed to initialize CSV Data Service:', error);
+      }
+    };
+
+    initCSVService();
+  }, []);
+
+  // Carica i dati enhanced del giocatore corrente
+  useEffect(() => {
+    const loadEnhancedData = async () => {
+      if (currentPlayerData) {
+        try {
+          const enhancedData = await csvDataService.getPlayerEnhancedData(
+            currentPlayerData.Nome,
+            currentPlayerData.Squadra
+          );
+          setCurrentPlayerEnhanced(enhancedData);
+        } catch (error) {
+          console.error('Error loading enhanced player data:', error);
+          setCurrentPlayerEnhanced({
+            isTitolare: false,
+            topIncroci: [],
+            lastYearData: null
+          });
+        }
+      } else {
+        setCurrentPlayerEnhanced(null);
+      }
+    };
+
+    loadEnhancedData();
+  }, [currentPlayerData]);
 
   // Load teams for the teams panel - solo dopo che il CONFIG è pronto
   useEffect(() => {
@@ -927,7 +969,8 @@ const AuctionPage: React.FC = () => {
       <Paper elevation={2} sx={{ p: 3, mb: 2 }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap">
           <Typography variant="h5" component="h1" color="primary">
-            🏆 {auction?.auctionName}
+            🏆 <strong>{auction?.groupConfig?.groupName}</strong> 
+            {` - Anno ${auction?.groupConfig?.year}`} ({auction?.auctionName})
           </Typography>
           <Box display="flex" gap={1} alignItems="center">
             <Chip 
@@ -956,19 +999,6 @@ const AuctionPage: React.FC = () => {
           </Box>
         </Box>
       </Paper>
-
-      {/* Indicatore Configurazione Gruppo */}
-      {auction?.groupConfig ? (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          🏆 Configurazione Gruppo: <strong>{auction.groupConfig.groupName}</strong> 
-          {` - Anno ${auction.groupConfig.year}`}
-        </Alert>
-      ) : (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          ⚠️ Asta senza configurazione gruppo. Alcune funzionalità potrebbero non essere disponibili. 
-          Le nuove aste richiedono una configurazione gruppo valida.
-        </Alert>
-      )}
 
       {/* Welcome Back Message */}
       {showWelcomeBack && (
@@ -1006,10 +1036,63 @@ const AuctionPage: React.FC = () => {
                     {auction.currentPlayer}
                   </Typography>
                   {currentPlayerData && (
-                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
                       <Chip label={currentPlayerData.Ruolo} color="primary" size="small" />
                       <Chip label={currentPlayerData.Squadra} variant="outlined" size="small" />
                       <Chip label={`FM: ${currentPlayerData.FantaMedia.toFixed(1)}`} color="secondary" size="small" />
+                      
+                      {/* Tier */}
+                      {currentPlayerEnhanced?.tier && (
+                        <Chip 
+                          label={`Tier ${currentPlayerEnhanced.tier}`} 
+                          color={
+                            currentPlayerEnhanced.tier === 1 ? 'success' :
+                            currentPlayerEnhanced.tier === 2 ? 'primary' :
+                            currentPlayerEnhanced.tier === 3 ? 'warning' : 'error'
+                          }
+                          size="small" 
+                        />
+                      )}
+                      
+                      {/* Titolare */}
+                      {currentPlayerEnhanced?.isTitolare && (
+                        <Chip label="Titolare" color="success" variant="filled" size="small" />
+                      )}
+                      
+                      {/* Infortunio */}
+                      {currentPlayerEnhanced?.infortunio && (
+                        <Chip 
+                          label={`🏥 ${currentPlayerEnhanced.infortunio.rientroMesi}m`} 
+                          color="error" 
+                          size="small" 
+                        />
+                      )}
+                    </Box>
+                  )}
+                  
+                  {/* Top 3 Incroci */}
+                  {currentPlayerEnhanced?.topIncroci && currentPlayerEnhanced.topIncroci.length > 0 && (
+                    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
+                        Incroci:
+                      </Typography>
+                      {currentPlayerEnhanced.topIncroci.map((incrocio) => (
+                        <Chip
+                          key={incrocio.squadra}
+                          label={`${incrocio.squadra} (${incrocio.valore})`}
+                          variant={incrocio.valore === 0 ? "filled" : "outlined"}
+                          color={incrocio.valore === 0 ? "success" : "default"}
+                          size="small"
+                          sx={{ 
+                            fontSize: '0.7rem', 
+                            height: '20px',
+                            fontWeight: incrocio.valore === 0 ? 'bold' : 'normal',
+                            '& .MuiChip-label': {
+                              px: incrocio.valore === 0 ? 1 : 0.5
+                            }
+                          }}
+                        />
+                      ))}
                     </Box>
                   )}
                 </Box>
@@ -1026,7 +1109,7 @@ const AuctionPage: React.FC = () => {
                     Offerta Corrente
                   </Typography>
                   <Typography variant="h4" component="div" color="primary" fontWeight="bold">
-                    €{auction.currentBid || 0}
+                    ${auction.currentBid || 0}
                   </Typography>
                   {auction.currentBidder && (
                     <Typography variant="body2" color="text.secondary">
@@ -1093,6 +1176,99 @@ const AuctionPage: React.FC = () => {
                   </Box>
                 </Box>
               )}
+              
+              {/* Dettagli Infortunio */}
+              {currentPlayerEnhanced?.infortunio && (
+                <Box sx={{ 
+                  p: 2, 
+                  borderTop: '1px solid',
+                  borderColor: 'divider',
+                  backgroundColor: 'error.light',
+                  color: 'error.contrastText'
+                }}>
+                  <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>
+                    ⚠️ Infortunio: {currentPlayerEnhanced.infortunio.tipoInfortunio}
+                  </Typography>
+                  <Typography variant="body2">
+                    Rientro previsto: {currentPlayerEnhanced.infortunio.rientroMesi} {currentPlayerEnhanced.infortunio.rientroMesi === 1 ? 'mese' : 'mesi'}
+                  </Typography>
+                </Box>
+              )}
+              
+              {/* Dati Anno Precedente */}
+              {currentPlayerEnhanced?.lastYearData && (
+                <Box sx={{ 
+                  p: 2, 
+                  borderTop: '1px solid',
+                  borderColor: 'divider',
+                }}>
+                  <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>
+                    📊 Anno Precedente
+                  </Typography>
+                  <Box sx={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: { xs: 'repeat(3, 1fr)', sm: 'repeat(6, 1fr)' }, 
+                    gap: 1,
+                    textAlign: 'center'
+                  }}>
+                    <Box>
+                      <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Media</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        {currentPlayerEnhanced.lastYearData.average.toFixed(1)}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Voti</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        {currentPlayerEnhanced.lastYearData.withVote}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>≥6</Typography>
+                      <Typography variant="body2" fontWeight="bold" color="success.main">
+                        {currentPlayerEnhanced.lastYearData.isEnough}
+                      </Typography>
+                    </Box>
+                    {currentPlayerEnhanced.lastYearData.role === 0 ? (
+                      <>
+                        <Box>
+                          <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>GS</Typography>
+                          <Typography variant="body2" fontWeight="bold" color="error.main">
+                            {currentPlayerEnhanced.lastYearData.sufferedGoal}
+                          </Typography>
+                        </Box>
+                        <Box>
+                          <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>RP</Typography>
+                          <Typography variant="body2" fontWeight="bold" color="success.main">
+                            {currentPlayerEnhanced.lastYearData.stoppedPenalty}
+                          </Typography>
+                        </Box>
+                      </>
+                    ) : (
+                      <>
+                        <Box>
+                          <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Goal</Typography>
+                          <Typography variant="body2" fontWeight="bold" color="success.main">
+                            {currentPlayerEnhanced.lastYearData.goal}
+                          </Typography>
+                        </Box>
+                        <Box>
+                          <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Assist</Typography>
+                          <Typography variant="body2" fontWeight="bold" color="info.main">
+                            {currentPlayerEnhanced.lastYearData.assist}
+                          </Typography>
+                        </Box>
+                      </>
+                    )}
+                    <Box>
+                      <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>G/R</Typography>
+                      <Typography variant="body2" fontWeight="bold" color="warning.main">
+                        {currentPlayerEnhanced.lastYearData.yellowCard}/{currentPlayerEnhanced.lastYearData.redCard}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Box>
+              )}
             </Paper>
           ) : (
             <Paper elevation={2} sx={{ p: 3, mb: 2, textAlign: 'center', backgroundColor: 'grey.50' }}>
@@ -1129,11 +1305,11 @@ const AuctionPage: React.FC = () => {
                   disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer()}
                   sx={{ 
                     py: { xs: 1.5, sm: 2 },
-                    fontSize: { xs: '1.8rem', sm: '1.9rem' },
+                    fontSize: { xs: '1.6rem', sm: '1.7rem' },
                     minHeight: { xs: '80px', sm: '88px' }
                   }}
                 >
-                  +€{amount}
+                  +${amount} ({(auction?.currentBid || 0) + amount})
                 </Button>
               ))}
             </Box>
@@ -1148,11 +1324,11 @@ const AuctionPage: React.FC = () => {
                   disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer()}
                   sx={{ 
                     py: { xs: 1.5, sm: 2 },
-                    fontSize: { xs: '0.8rem', sm: '0.9rem' },
+                    fontSize: { xs: '0.7rem', sm: '0.8rem' },
                     minHeight: { xs: '40px', sm: '48px' }
                   }}
                 >
-                  +€{amount}
+                  +${amount} ({(auction?.currentBid || 0) + amount})
                 </Button>
               ))}
             </Box>
@@ -1228,7 +1404,7 @@ const AuctionPage: React.FC = () => {
                         </Typography>
                         <Typography variant="caption" color="text.secondary">{t.owner || '—'}</Typography>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
-                          <Typography variant="h6">€{remaining}</Typography>
+                          <Typography variant="h6">${remaining}</Typography>
                         </Box>
                         <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
                           <Chip 
@@ -1346,7 +1522,7 @@ const AuctionPage: React.FC = () => {
                     onClick={handlePlayerSold}
                     disabled={auction?.isLocked}
                   >
-                    Aggiudica a {resolveBuyerDisplay(auction.currentBidder) || 'Base'} - €{auction.currentBid}
+                    Aggiudica a {resolveBuyerDisplay(auction.currentBidder) || 'Base'} - ${auction.currentBid}
                   </Button>
                 )}
                 
@@ -1427,7 +1603,7 @@ const AuctionPage: React.FC = () => {
           <TextField
             autoFocus
             margin="dense"
-            label="Importo (€)"
+            label="Importo ($)"
             type="number"
             fullWidth
             variant="outlined"
@@ -1599,7 +1775,7 @@ const AuctionPage: React.FC = () => {
                           <TableCell>{p.Nome}</TableCell>
                           <TableCell>{p.Ruolo}</TableCell>
                           <TableCell>{p.Squadra}</TableCell>
-                          <TableCell>{matching ? `€${matching.price}` : '—'}</TableCell>
+                          <TableCell>{matching ? `$${matching.price}` : '—'}</TableCell>
                           <TableCell>{matching ? (matching.buyerEmail ? (buyerNameCache[matching.buyerEmail] || matching.buyer) : (matching.buyer || '—')) : '—'}</TableCell>
                         </TableRow>
                       );

@@ -318,12 +318,17 @@ export async function getTeams(): Promise<TeamInfo[]> {
   });
 }
 
-export async function getAllPlayers(): Promise<StatPlayer[]> {
+export async function getAllPlayers(customYear?: string): Promise<StatPlayer[]> {
   validateConfig();
-  const url = `${BASE}/GetAllPlayers?year=${CONFIG.YEAR}`;
+  const year = customYear || CONFIG.YEAR;
+  const url = `${BASE}/GetAllPlayers?year=${year}`;
+  console.log('Calling getAllPlayers API:', url);
+  
   const res = await fetch(url);
   if (!res.ok) throw new Error(`GetAllPlayers API error ${res.status}`);
   const json = await res.json() as ApiStatPlayer[];
+  
+  console.log('getAllPlayers response for year', year, ':', json?.length || 0, 'players');
 
   return (json || []).map(player => {
     const average = player.v > 0 ? player.z / player.v : 0;
@@ -369,6 +374,57 @@ export async function getAllPlayers(): Promise<StatPlayer[]> {
   });
 }
 
+// Funzione helper per ottenere i giocatori dell'anno precedente
+export async function getAllPlayersLastYear(): Promise<StatPlayer[]> {
+  validateConfig();
+  const currentYear = parseInt(CONFIG.YEAR);
+  const lastYear = (currentYear - 1).toString();
+  console.log('Fetching players for last year:', lastYear, '(current year:', CONFIG.YEAR, ')');
+  
+  const players = await getAllPlayers(lastYear);
+  console.log('Last year players fetched:', players.length);
+  
+  return players;
+}
+
+// Funzione helper per ottenere i dati di un giocatore dall'anno precedente
+export async function getPlayerLastYearData(playerName: string, teamName: string): Promise<StatPlayer | null> {
+  try {
+    console.log('Getting last year data for:', playerName, 'from team:', teamName);
+    console.log('Current CONFIG.YEAR:', CONFIG.YEAR);
+    
+    const lastYearPlayers = await getAllPlayersLastYear();
+    console.log('Total last year players found:', lastYearPlayers.length);
+    
+    // Debug: mostra alcuni giocatori per verificare la struttura
+    if (lastYearPlayers.length > 0) {
+      console.log('Sample last year player:', lastYearPlayers[0]);
+    }
+    
+    const player = lastYearPlayers.find(p => 
+      p.name.toLowerCase() === playerName.toLowerCase() &&
+      p.teamName.toLowerCase() === teamName.toLowerCase()
+    );
+    
+    console.log('Found player match:', player ? 'YES' : 'NO');
+    if (player) {
+      console.log('Player data:', player);
+    } else {
+      // Debug: cerca giocatori con nome simile
+      const similarPlayers = lastYearPlayers.filter(p => 
+        p.name.toLowerCase().includes(playerName.toLowerCase()) ||
+        playerName.toLowerCase().includes(p.name.toLowerCase())
+      );
+      console.log('Similar players found:', similarPlayers.length, similarPlayers.map(p => ({ name: p.name, team: p.teamName })));
+    }
+    
+    return player || null;
+  } catch (error) {
+    console.warn('Error fetching last year data:', error);
+    return null;
+  }
+}
+
 // add to default export
 export default Object.assign({}, {
   CONFIG,
@@ -379,5 +435,7 @@ export default Object.assign({}, {
   setPlayer,
   getTeams,
   getAllPlayers,
+  getAllPlayersLastYear,
+  getPlayerLastYearData,
 });
 
