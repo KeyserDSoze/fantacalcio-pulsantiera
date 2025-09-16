@@ -172,6 +172,15 @@ const AuctionPage: React.FC = () => {
     return teams.find(team => team.owner === playerEmail);
   };
 
+  // Funzione per verificare se l'utente ha un team valido
+  const userHasValidTeam = () => {
+    // Il banditore può sempre operare, indipendentemente dal team
+    if (isBanditore) return true;
+    
+    if (!playerEmail || !teams) return false;
+    return teams.some(team => team.owner === playerEmail);
+  };
+
   // Funzione per controllare se un utente può prendere un giocatore di un determinato ruolo
   const canUserTakePlayerRole = (userEmail: string, playerRole: 'Portiere' | 'Difensore' | 'Centrocampista' | 'Attaccante') => {
     if (!teams) return true; // Se non abbiamo i dati dei team, permettiamo l'offerta
@@ -198,6 +207,14 @@ const AuctionPage: React.FC = () => {
     if (!currentPlayerData || !playerEmail || !teams) return true; // Fallback: permetti l'offerta
     
     return canUserTakePlayerRole(playerEmail, currentPlayerData.Ruolo);
+  };
+
+  // Funzione per verificare se l'utente corrente è già il miglior offerente
+  const isCurrentUserHighestBidder = () => {
+    if (!auction?.currentBidder || !playerName.trim()) return false;
+    
+    // Confronta il nome del giocatore con il currentBidder
+    return auction.currentBidder === playerName.trim();
   };
 
   const refreshTeams = async () => {
@@ -1196,79 +1213,80 @@ const AuctionPage: React.FC = () => {
               )}
               
               {/* Dati Anno Precedente */}
-              {currentPlayerEnhanced?.lastYearData && (
+              <Box sx={{ 
+                p: 2, 
+                borderTop: '1px solid',
+                borderColor: 'divider',
+              }}>
+                <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>
+                  📊 Anno Precedente
+                </Typography>
                 <Box sx={{ 
-                  p: 2, 
-                  borderTop: '1px solid',
-                  borderColor: 'divider',
+                  display: 'grid', 
+                  gridTemplateColumns: { xs: 'repeat(3, 1fr)', sm: 'repeat(6, 1fr)' }, 
+                  gap: 1,
+                  textAlign: 'center'
                 }}>
-                  <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>
-                    📊 Anno Precedente
-                  </Typography>
-                  <Box sx={{ 
-                    display: 'grid', 
-                    gridTemplateColumns: { xs: 'repeat(3, 1fr)', sm: 'repeat(6, 1fr)' }, 
-                    gap: 1,
-                    textAlign: 'center'
-                  }}>
-                    <Box>
-                      <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Media</Typography>
-                      <Typography variant="body2" fontWeight="bold">
-                        {currentPlayerEnhanced.lastYearData.average.toFixed(1)}
-                      </Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Voti</Typography>
-                      <Typography variant="body2" fontWeight="bold">
-                        {currentPlayerEnhanced.lastYearData.withVote}
-                      </Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>≥6</Typography>
-                      <Typography variant="body2" fontWeight="bold" color="success.main">
-                        {currentPlayerEnhanced.lastYearData.isEnough}
-                      </Typography>
-                    </Box>
-                    {currentPlayerEnhanced.lastYearData.role === 0 ? (
-                      <>
-                        <Box>
-                          <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>GS</Typography>
-                          <Typography variant="body2" fontWeight="bold" color="error.main">
-                            {currentPlayerEnhanced.lastYearData.sufferedGoal}
-                          </Typography>
-                        </Box>
-                        <Box>
-                          <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>RP</Typography>
-                          <Typography variant="body2" fontWeight="bold" color="success.main">
-                            {currentPlayerEnhanced.lastYearData.stoppedPenalty}
-                          </Typography>
-                        </Box>
-                      </>
-                    ) : (
-                      <>
-                        <Box>
-                          <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Goal</Typography>
-                          <Typography variant="body2" fontWeight="bold" color="success.main">
-                            {currentPlayerEnhanced.lastYearData.goal}
-                          </Typography>
-                        </Box>
-                        <Box>
-                          <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Assist</Typography>
-                          <Typography variant="body2" fontWeight="bold" color="info.main">
-                            {currentPlayerEnhanced.lastYearData.assist}
-                          </Typography>
-                        </Box>
-                      </>
-                    )}
-                    <Box>
-                      <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>G/R</Typography>
-                      <Typography variant="body2" fontWeight="bold" color="warning.main">
-                        {currentPlayerEnhanced.lastYearData.yellowCard}/{currentPlayerEnhanced.lastYearData.redCard}
-                      </Typography>
-                    </Box>
+                  <Box>
+                    <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Media</Typography>
+                    <Typography variant="body2" fontWeight="bold">
+                      {currentPlayerEnhanced?.lastYearData?.average.toFixed(1) || '—'}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Voti</Typography>
+                    <Typography variant="body2" fontWeight="bold">
+                      {currentPlayerEnhanced?.lastYearData?.withVote || '—'}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>≥6</Typography>
+                    <Typography variant="body2" fontWeight="bold" color="success.main">
+                      {currentPlayerEnhanced?.lastYearData?.isEnough || '—'}
+                    </Typography>
+                  </Box>
+                  {(currentPlayerEnhanced?.lastYearData?.role === 0 || currentPlayerData?.Ruolo === 'Portiere') ? (
+                    <>
+                      <Box>
+                        <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>GS</Typography>
+                        <Typography variant="body2" fontWeight="bold" color="error.main">
+                          {currentPlayerEnhanced?.lastYearData?.sufferedGoal || '—'}
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>RP</Typography>
+                        <Typography variant="body2" fontWeight="bold" color="success.main">
+                          {currentPlayerEnhanced?.lastYearData?.stoppedPenalty || '—'}
+                        </Typography>
+                      </Box>
+                    </>
+                  ) : (
+                    <>
+                      <Box>
+                        <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Goal</Typography>
+                        <Typography variant="body2" fontWeight="bold" color="success.main">
+                          {currentPlayerEnhanced?.lastYearData?.goal || '—'}
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>Assist</Typography>
+                        <Typography variant="body2" fontWeight="bold" color="info.main">
+                          {currentPlayerEnhanced?.lastYearData?.assist || '—'}
+                        </Typography>
+                      </Box>
+                    </>
+                  )}
+                  <Box>
+                    <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>G/R</Typography>
+                    <Typography variant="body2" fontWeight="bold" color="warning.main">
+                      {currentPlayerEnhanced?.lastYearData ? 
+                        `${currentPlayerEnhanced.lastYearData.yellowCard}/${currentPlayerEnhanced.lastYearData.redCard}` : 
+                        '—'
+                      }
+                    </Typography>
                   </Box>
                 </Box>
-              )}
+              </Box>
             </Paper>
           ) : (
             <Paper elevation={2} sx={{ p: 3, mb: 2, textAlign: 'center', backgroundColor: 'grey.50' }}>
@@ -1281,8 +1299,22 @@ const AuctionPage: React.FC = () => {
             </Paper>
           )}
 
-          {/* Bid Buttons - hidden in display view and for banditore */}
-          {!isDisplayView && !isBanditore && (
+          {/* Warning for users without valid team */}
+          {!isDisplayView && !isBanditore && hasJoined && !userHasValidTeam() && (
+            <Paper elevation={2} sx={{ p: 3, mb: 2 }}>
+              <Alert severity="warning">
+                <Typography variant="body1" fontWeight="bold" gutterBottom>
+                  Non puoi fare offerte
+                </Typography>
+                <Typography variant="body2">
+                  Non fai parte di nessun team di questa lega. Solo i proprietari di squadre registrate possono partecipare alle offerte.
+                </Typography>
+              </Alert>
+            </Paper>
+          )}
+
+          {/* Bid Buttons - hidden in display view, for banditore, and for users without valid team */}
+          {!isDisplayView && !isBanditore && userHasValidTeam() && (
             <Paper elevation={2} sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom sx={{ fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
               Fai la tua offerta:
@@ -1295,6 +1327,8 @@ const AuctionPage: React.FC = () => {
               </Alert>
             )}
             
+           
+            
            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(2, 1fr)' }, gap: 1, mb: 2 }}>
               {[1, 3].map((amount) => (
                 <Button
@@ -1302,14 +1336,14 @@ const AuctionPage: React.FC = () => {
                   variant="contained"
                   size="medium"
                   onClick={() => handleBid(amount)}
-                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer()}
+                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder()}
                   sx={{ 
                     py: { xs: 1.5, sm: 2 },
                     fontSize: { xs: '1.6rem', sm: '1.7rem' },
                     minHeight: { xs: '80px', sm: '88px' }
                   }}
                 >
-                  +${amount} ({(auction?.currentBid || 0) + amount})
+                  {amount === 1 ? `Incremento`: `+${amount}`}  ({(auction?.currentBid || 0) + amount})
                 </Button>
               ))}
             </Box>
@@ -1321,7 +1355,7 @@ const AuctionPage: React.FC = () => {
                   variant="contained"
                   size="medium"
                   onClick={() => handleBid(amount)}
-                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer()}
+                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder()}
                   sx={{ 
                     py: { xs: 1.5, sm: 2 },
                     fontSize: { xs: '0.7rem', sm: '0.8rem' },
@@ -1339,14 +1373,22 @@ const AuctionPage: React.FC = () => {
               size="large"
               startIcon={<Euro />}
               onClick={() => setShowCustomDialog(true)}
-              disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer()}
+              disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder()}
               sx={{ py: { xs: 1.5, sm: 2 } }}
             >
               Offerta Personalizzata
             </Button>
+
+             {/* Messaggio quando l'utente è già il miglior offerente */}
+              {isCurrentUserHighestBidder() && (
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  🏆 Sei già il miglior offerente! Aspetta che qualcun altro rilanci per poter aumentare la tua offerta.
+                </Alert>
+              )}
+              
             </Paper>
           )}
-
+            
           {/* Teams Panel */}
             <Box sx={{ mt: 2 }}>
               <Typography variant="subtitle1" gutterBottom>Stato Squadre</Typography>
