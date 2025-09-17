@@ -43,6 +43,7 @@ import {
   Lock,
   LockOpen,
   Refresh,
+  Timer,
   Group,
   Gavel,
   Logout,
@@ -167,6 +168,14 @@ const AuctionPage: React.FC = () => {
   });
   const audioCtxRef = useRef<AudioContext | null>(null);
 
+  // Offer timer state (bottom-right visible). Default 10s, configurable by banditore via Firestore field `offerTimeoutSeconds`.
+  const [offerTimeoutMax, setOfferTimeoutMax] = useState<number>(10);
+  const [offerTimeoutInput, setOfferTimeoutInput] = useState<string>('10');
+  const [timerSecondsLeft, setTimerSecondsLeft] = useState<number>(0);
+  const [timerRunning, setTimerRunning] = useState<boolean>(false);
+  const [timerExpired, setTimerExpired] = useState<boolean>(false);
+  const [firstOfferHappened, setFirstOfferHappened] = useState<boolean>(false);
+
   // Persist preferences to localStorage when changed
   useEffect(() => {
     try { localStorage.setItem('fantacalcio_soundEnabled', soundEnabled.toString()); } catch {}
@@ -177,6 +186,35 @@ const AuctionPage: React.FC = () => {
   useEffect(() => {
     try { localStorage.setItem('fantacalcio_soundVolume', String(soundVolume)); } catch {}
   }, [soundVolume]);
+
+  // Sync offer timeout max from auction doc when available
+  useEffect(() => {
+    const v = (auction as any)?.offerTimeoutSeconds;
+    if (typeof v === 'number') {
+      setOfferTimeoutMax(v);
+      setOfferTimeoutInput(String(v));
+    } else {
+      setOfferTimeoutMax(10);
+      setOfferTimeoutInput('10');
+    }
+  }, [(auction as any)?.offerTimeoutSeconds]);
+
+  // Timer tick effect
+  useEffect(() => {
+    if (!timerRunning) return;
+    const interval = setInterval(() => {
+      setTimerSecondsLeft((s) => {
+        if (s <= 1) {
+          // expire
+          setTimerRunning(false);
+          setTimerExpired(true);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [timerRunning]);
 
   const DEFAULT_TEAM_BUDGET = 1000; // assumiamo budget iniziale se non fornito
 
@@ -707,7 +745,40 @@ const AuctionPage: React.FC = () => {
       
       return () => clearTimeout(timer);
     }
-  }, [auction?.currentBidder, auction?.currentBid, playerName, lastBidder, lastBidAmount, isDisplayView, isBanditore]);
+  }, [auction?.currentBidder, auction?.currentBid, playerName, lastBidder, lastBidAmount, isDisplayView, isBanditore, (auction as any)?.offerTimerStartedAt, timerRunning]);
+
+  // Start/restart the offer timer on any new bid (for everyone). The timer only starts after the first offer.
+  useEffect(() => {
+    if (!auction) return;
+    const currentBidder = auction.currentBidder;
+    const currentBid = auction.currentBid;
+
+    if (currentBidder && currentBid !== null && (currentBidder !== lastBidder || currentBid !== lastBidAmount)) {
+      // update tracking
+      setLastBidder(currentBidder);
+      setLastBidAmount(currentBid);
+
+      // Mark that at least one offer happened
+      setFirstOfferHappened(true);
+
+      // Restart the timer to the configured maximum
+      setTimerSecondsLeft(offerTimeoutMax);
+      setTimerExpired(false);
+      setTimerRunning(true);
+    }
+  }, [auction?.currentBid, auction?.currentBidder, offerTimeoutMax, lastBidder, lastBidAmount]);
+
+  // Start timer when `offerTimerStartedAt` field changes in Firestore (used for banditore resets)
+  useEffect(() => {
+    const startedAt = (auction as any)?.offerTimerStartedAt;
+    if (!startedAt) return;
+    // Start/restart timer for everyone
+    setFirstOfferHappened(true);
+    setTimerSecondsLeft(offerTimeoutMax);
+    setTimerExpired(false);
+    setTimerRunning(true);
+    setIsTemporarilyBlocked(false);
+  }, [(auction as any)?.offerTimerStartedAt, offerTimeoutMax]);
 
   const handleJoinAsPlayer = async () => {
     if (!playerName.trim() || !auction) return;
@@ -749,7 +820,9 @@ const AuctionPage: React.FC = () => {
   const handleBid = async (amount: number) => {
   // Do not allow bids if auction missing, user not joined, auction locked or no player is currently in auction
   // Also prevent bidding when in display view or when the current user is the banditore
-  if (!auction || !hasJoined || auction.isLocked || !auction.currentPlayer || isDisplayView || isBanditore) return;
+  if (!auction || !hasJoined || auction.isLocked || !auction.currentPlayer || isDisplayView) return;
+  // If timer expired, only banditore can act
+  if (timerExpired && !isBanditore) return;
     
     // Controllo limite ruoli - verifica se l'utente può prendere questo giocatore
     if (playerEmail && currentPlayerData) {
@@ -772,13 +845,14 @@ const AuctionPage: React.FC = () => {
     }
 
     const newBid = auction.currentBid + amount;
-    const bidderName = isBanditore ? "Banditore" : playerName.trim();
+  const bidderName = isBanditore ? "Banditore" : playerName.trim();
     
     try {
       await updateDoc(doc(db, "aste", id!), {
         currentBid: newBid,
         currentBidder: bidderName,
         isActive: true,
+        offerTimerStartedAt: new Date().toISOString(),
       });
     } catch (error) {
       console.error("Errore nel fare l'offerta:", error);
@@ -953,8 +1027,14 @@ const AuctionPage: React.FC = () => {
   const handleCustomBid = async () => {
   // Prevent custom bids when there's no player in auction or auction is locked / user not joined
   // Also prevent custom bids in display view or by the banditore
-  if (!auction || auction.isLocked || !hasJoined || !auction.currentPlayer || isDisplayView || isBanditore) {
+  if (!auction || auction.isLocked || !hasJoined || !auction.currentPlayer || isDisplayView) {
       alert("Non ci sono giocatori in asta o non puoi fare offerte");
+      return;
+    }
+
+    // If timer expired, only banditore can make custom bid
+    if (timerExpired && !isBanditore) {
+      alert('Tempo scaduto: solo il banditore può confermare o resettare.');
       return;
     }
 
@@ -986,13 +1066,14 @@ const AuctionPage: React.FC = () => {
       return;
     }
 
-    const bidderName = isBanditore ? "Banditore" : playerName.trim();
+  const bidderName = isBanditore ? "Banditore" : playerName.trim();
 
     try {
       await updateDoc(doc(db, "aste", id!), {
         currentBid: amount,
         currentBidder: bidderName,
         isActive: true,
+        offerTimerStartedAt: new Date().toISOString(),
       });
       setShowCustomDialog(false);
       setCustomBid("");
@@ -1032,6 +1113,11 @@ const AuctionPage: React.FC = () => {
           currentBidder: `${banditoreSelectedTeam.name} (Banditore)`,
           isActive: true,
         });
+        // When banditore bids for a team, restart the timer
+        setFirstOfferHappened(true);
+        setTimerSecondsLeft(offerTimeoutMax);
+        setTimerExpired(false);
+        setTimerRunning(true);
         setShowCustomDialog(false);
         setCustomBid("");
       } catch (error) {
@@ -1184,7 +1270,7 @@ const AuctionPage: React.FC = () => {
 
       // If API succeeded, update Firestore
       try {
-        // Salva il giocatore corrente come precedente prima di aggiornare
+  // Salva il giocatore corrente come precedente prima di aggiornare
         setPreviousPlayer(auction.currentPlayer);
 
         await updateDoc(doc(db, "aste", id!), {
@@ -1195,6 +1281,13 @@ const AuctionPage: React.FC = () => {
           isActive: false,
           salesHistory: arrayUnion({ playerName: auction.currentPlayer, price: auction.currentBid, buyer: bidderLabel, buyerEmail: buyerEmail || null })
         });
+
+        // Stop timer when player is sold
+        setTimerRunning(false);
+        setTimerExpired(false);
+        setTimerSecondsLeft(0);
+  // Unblock any temporary UI block
+  setIsTemporarilyBlocked(false);
 
         setSnackbarSeverity('success');
         setSnackbarMsg('Giocatore assegnato correttamente');
@@ -1294,13 +1387,35 @@ const AuctionPage: React.FC = () => {
     if (!auction || !isBanditore) return;
     
     try {
+      // Reset current offers (keep auction active) and restart canonical timer
       await updateDoc(doc(db, "aste", id!), {
         currentBid: 0,
         currentBidder: null,
-        isActive: false,
+        isActive: true,
+        offerTimerStartedAt: new Date().toISOString(),
       });
     } catch (error) {
       console.error("Errore nel reset dell'asta:", error);
+    }
+  };
+
+  // Reset only the canonical offer timer for all clients (do not change bids)
+  const handleResetTimer = async () => {
+    if (!auction || !isBanditore) return;
+    try {
+      const startedAt = new Date().toISOString();
+      await updateDoc(doc(db, "aste", id!), {
+        offerTimerStartedAt: startedAt,
+      });
+
+      // immediate local UI update for snappy UX: restart timer and clear temporary block
+      setFirstOfferHappened(true);
+      setTimerSecondsLeft(offerTimeoutMax);
+      setTimerExpired(false);
+      setTimerRunning(true);
+      setIsTemporarilyBlocked(false);
+    } catch (error) {
+      console.error("Errore nel reset del timer:", error);
     }
   };
 
@@ -1408,6 +1523,33 @@ const AuctionPage: React.FC = () => {
               label="Vibrazione"
               sx={{ ml: 0.5 }}
             />
+            {isBanditore && (
+              <Box sx={{ display: 'flex', alignItems: 'center', ml: 1 }}>
+                <TextField
+                  size="small"
+                  label="Timeout (s)"
+                  value={offerTimeoutInput}
+                  onChange={(e) => setOfferTimeoutInput(e.target.value)}
+                  sx={{ width: 100 }}
+                />
+                <Button
+                  size="small"
+                  onClick={async () => {
+                    const v = Number(offerTimeoutInput);
+                    if (isNaN(v) || v <= 0) return alert('Inserisci un numero valido di secondi');
+                    try {
+                      await updateDoc(doc(db, 'aste', id!), { offerTimeoutSeconds: v });
+                      setOfferTimeoutMax(v);
+                      setOfferTimeoutInput(String(v));
+                    } catch (err) {
+                      console.error('Errore nel salvare timeout', err);
+                    }
+                  }}
+                >
+                  Salva
+                </Button>
+              </Box>
+            )}
           </Box>
         </Box>
       </Paper>
@@ -1802,6 +1944,7 @@ const AuctionPage: React.FC = () => {
                         currentBid: fixedAmount,
                         currentBidder: bidderName,
                         isActive: true,
+                        offerTimerStartedAt: new Date().toISOString(),
                       });
                     } catch (error) {
                       console.error("Errore nel fare l'offerta:", error);
@@ -1896,6 +2039,7 @@ const AuctionPage: React.FC = () => {
                           currentBid: (auction.currentBid || 0) + amount,
                           currentBidder: `${banditoreSelectedTeam.name} (Banditore)`,
                           isActive: true,
+                          offerTimerStartedAt: new Date().toISOString(),
                         });
                       } catch (error) {
                         console.error("Errore nel fare l'offerta per la squadra:", error);
@@ -1934,11 +2078,12 @@ const AuctionPage: React.FC = () => {
                       }
 
                       try {
-                        await updateDoc(doc(db, "aste", id!), {
-                          currentBid: (auction.currentBid || 0) + amount,
-                          currentBidder: `${banditoreSelectedTeam.name} (Banditore)`,
-                          isActive: true,
-                        });
+                          await updateDoc(doc(db, "aste", id!), {
+                            currentBid: (auction.currentBid || 0) + amount,
+                            currentBidder: `${banditoreSelectedTeam.name} (Banditore)`,
+                            isActive: true,
+                            offerTimerStartedAt: new Date().toISOString(),
+                          });
                       } catch (error) {
                         console.error("Errore nel fare l'offerta per la squadra:", error);
                       }
@@ -2284,6 +2429,16 @@ const AuctionPage: React.FC = () => {
                 >
                   Reset Offerte
                 </Button>
+
+                <Button
+                  variant="outlined"
+                  startIcon={<Timer />}
+                  onClick={handleResetTimer}
+                  color="info"
+                  sx={{ ml: 1 }}
+                >
+                  Reset Timer
+                </Button>
               </Box>
             </Paper>
 
@@ -2318,6 +2473,37 @@ const AuctionPage: React.FC = () => {
             
           </Box>
         )}
+      </Box>
+
+      {/* Fixed bottom-right timer */}
+      <Box sx={{ position: 'fixed', right: 16, bottom: 16, zIndex: 1400 }}>
+        <Paper elevation={6} sx={{ p: 1.5, minWidth: 160, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="subtitle2">Timer Offerta</Typography>
+            <Typography variant="h6" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+              {firstOfferHappened ? `${timerSecondsLeft}s` : '—'}
+            </Typography>
+            {timerExpired && <Typography variant="caption" color="error">Tempo scaduto</Typography>}
+          </Box>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {/* If expired, show banditore-only actions */}
+            {timerExpired ? (
+              isBanditore ? (
+                <>
+                  <Button size="small" variant="outlined" onClick={handleResetTimer}>Reset Timer</Button>
+                  <Button size="small" variant="contained" color="primary" onClick={async () => {
+                    // Confirm: call existing handlePlayerSold
+                    await handlePlayerSold();
+                  }}>Conferma</Button>
+                </>
+              ) : (
+                <Typography variant="caption">In attesa banditore</Typography>
+              )
+            ) : (
+              <></>
+            )}
+          </Box>
+        </Paper>
       </Box>
 
       {/* Navigation */}
