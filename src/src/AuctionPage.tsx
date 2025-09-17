@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { db } from "./firebase";
 import { doc, onSnapshot, updateDoc, arrayUnion } from "firebase/firestore";
@@ -32,7 +32,8 @@ import {
   Select,
   MenuItem,
   FormControl,
-  InputLabel,
+  Slider,
+  Switch,
 } from "@mui/material";
 import { 
   SportsEsports, 
@@ -138,6 +139,44 @@ const AuctionPage: React.FC = () => {
   const [isTemporarilyBlocked, setIsTemporarilyBlocked] = useState(false);
   const [lastBidder, setLastBidder] = useState<string | null>(null);
   const [lastBidAmount, setLastBidAmount] = useState<number | null>(null);
+
+  // Sound settings (persisted in localStorage)
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    try {
+      const val = localStorage.getItem('fantacalcio_soundEnabled');
+      return val === null ? true : val === 'true';
+    } catch {
+      return true;
+    }
+  });
+  const [soundVolume, setSoundVolume] = useState<number>(() => {
+    try {
+      const val = localStorage.getItem('fantacalcio_soundVolume');
+      return val === null ? 0.8 : Number(val);
+    } catch {
+      return 0.8;
+    }
+  }); // 0.0 - 1.0
+  const [vibrationEnabled, setVibrationEnabled] = useState<boolean>(() => {
+    try {
+      const val = localStorage.getItem('fantacalcio_vibrationEnabled');
+      return val === null ? true : val === 'true';
+    } catch {
+      return true;
+    }
+  });
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // Persist preferences to localStorage when changed
+  useEffect(() => {
+    try { localStorage.setItem('fantacalcio_soundEnabled', soundEnabled.toString()); } catch {}
+  }, [soundEnabled]);
+  useEffect(() => {
+    try { localStorage.setItem('fantacalcio_vibrationEnabled', vibrationEnabled.toString()); } catch {}
+  }, [vibrationEnabled]);
+  useEffect(() => {
+    try { localStorage.setItem('fantacalcio_soundVolume', String(soundVolume)); } catch {}
+  }, [soundVolume]);
 
   const DEFAULT_TEAM_BUDGET = 1000; // assumiamo budget iniziale se non fornito
 
@@ -658,11 +697,13 @@ const AuctionPage: React.FC = () => {
       
       // Activate temporary block
       setIsTemporarilyBlocked(true);
+      // Play sound to notify about external bid
+      playBidSound();
       
-      // Remove block after 1000ms
+      // Remove block after 500ms
       const timer = setTimeout(() => {
         setIsTemporarilyBlocked(false);
-      }, 1000);
+      }, 500);
       
       return () => clearTimeout(timer);
     }
@@ -741,6 +782,171 @@ const AuctionPage: React.FC = () => {
       });
     } catch (error) {
       console.error("Errore nel fare l'offerta:", error);
+    }
+  };
+
+  // Play an even more soave notification sound: dual oscillators, detune, lowpass, smooth ADSR
+  const playBidSound = () => {
+    if (!soundEnabled) return;
+    try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = audioCtxRef.current!;
+
+      // Ensure audio context is running (some browsers require user gesture)
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
+      const now = ctx.currentTime;
+      const noteDuration = 0.6; // each note length
+      const interNoteDelay = 0.18; // time between note starts
+
+      // Helper to create and play a single sax-like note starting at `start` with optional detune in cents
+      const playSingleNote = (start: number, detuneCents = 0) => {
+        // Nodes per note
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const bodyGain = ctx.createGain();
+        const formant1 = ctx.createBiquadFilter();
+        const formant2 = ctx.createBiquadFilter();
+        const masterGain = ctx.createGain();
+
+        // Breath/noise
+        const noiseBufferSize = Math.max(1, Math.floor(0.3 * ctx.sampleRate));
+        const noiseBuffer = ctx.createBuffer(1, noiseBufferSize, ctx.sampleRate);
+        const noiseData = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < noiseBufferSize; i++) noiseData[i] = (Math.random() * 2 - 1) * 0.32;
+        const noiseSource = ctx.createBufferSource();
+        noiseSource.buffer = noiseBuffer;
+        noiseSource.loop = true;
+        const noiseFilter = ctx.createBiquadFilter();
+        noiseFilter.type = 'lowpass';
+
+        // LFO for subtle vibrato on detune
+        const lfo = ctx.createOscillator();
+        const lfoGain = ctx.createGain();
+        lfo.type = 'sine';
+        lfo.frequency.setValueAtTime(5.5, start);
+        lfoGain.gain.setValueAtTime(6, start);
+
+        // Oscillator setup
+        osc1.type = 'sawtooth';
+        osc2.type = 'sine';
+        const baseFreq = 440;
+        osc1.frequency.setValueAtTime(baseFreq, start);
+        osc2.frequency.setValueAtTime(baseFreq * 1.5, start);
+        if (detuneCents) {
+          osc1.detune.setValueAtTime(detuneCents, start);
+          osc2.detune.setValueAtTime(detuneCents - 6, start);
+        } else {
+          osc2.detune.setValueAtTime(-10, start);
+        }
+
+        // LFO routing
+        lfo.connect(lfoGain);
+        lfoGain.connect(osc1.detune);
+        lfoGain.connect(osc2.detune);
+
+        // Formants
+        formant1.type = 'bandpass';
+        formant2.type = 'bandpass';
+        formant1.frequency.setValueAtTime(950, start);
+        formant1.Q.setValueAtTime(6, start);
+        formant2.frequency.setValueAtTime(1400, start);
+        formant2.Q.setValueAtTime(5, start);
+
+        // Noise filter
+        noiseFilter.frequency.setValueAtTime(1800, start);
+        noiseFilter.Q.setValueAtTime(0.7, start);
+
+        // Envelope
+        const attack = 0.05;
+        const decay = 0.08;
+        const sustain = 0.65;
+        const release = 0.28;
+
+        bodyGain.gain.cancelScheduledValues(start);
+        bodyGain.gain.setValueAtTime(0.0001, start);
+        bodyGain.gain.exponentialRampToValueAtTime(Math.max(0.001, soundVolume * 0.9), start + attack);
+        bodyGain.gain.exponentialRampToValueAtTime(Math.max(0.001, soundVolume * sustain), start + attack + decay);
+        bodyGain.gain.setValueAtTime(Math.max(0.001, soundVolume * sustain), start + noteDuration - release);
+        bodyGain.gain.exponentialRampToValueAtTime(0.0001, start + noteDuration + 0.02);
+
+        const breathGain = ctx.createGain();
+        breathGain.gain.setValueAtTime(0.0001, start);
+        breathGain.gain.exponentialRampToValueAtTime(Math.max(0.001, soundVolume * 0.36), start + attack * 0.7);
+        breathGain.gain.exponentialRampToValueAtTime(0.0001, start + noteDuration + 0.02);
+
+        // Routing
+        osc1.connect(formant1);
+        osc2.connect(formant1);
+        formant1.connect(formant2);
+        formant2.connect(bodyGain);
+        bodyGain.connect(masterGain);
+
+        noiseSource.connect(noiseFilter);
+        noiseFilter.connect(breathGain);
+        breathGain.connect(masterGain);
+
+        masterGain.connect(ctx.destination);
+        masterGain.gain.setValueAtTime(1, start);
+
+        // Start/stop
+        try {
+          osc1.start(start);
+          osc2.start(start + 0.006);
+          noiseSource.start(start);
+          lfo.start(start);
+        } catch (e) {
+          // ignore start errors
+        }
+
+        const stopTime = start + noteDuration + 0.04;
+        try {
+          osc1.stop(stopTime);
+          osc2.stop(stopTime);
+          noiseSource.stop(stopTime);
+          lfo.stop(stopTime);
+        } catch (e) {
+          // ignore stop errors
+        }
+
+        // schedule cleanup
+        setTimeout(() => {
+          try {
+            osc1.disconnect(); osc2.disconnect(); lfo.disconnect(); lfoGain.disconnect();
+            formant1.disconnect(); formant2.disconnect(); bodyGain.disconnect(); noiseFilter.disconnect();
+            breathGain.disconnect(); masterGain.disconnect();
+            noiseSource.disconnect();
+          } catch (e) {
+            // ignore
+          }
+        }, (noteDuration + interNoteDelay + 0.15) * 1000);
+      };
+
+      // Play two notes in quick succession with slight detune on the second
+      const firstStart = now;
+      const secondStart = now + interNoteDelay;
+      playSingleNote(firstStart, 0);
+      playSingleNote(secondStart, 12); // 12 cents up for a little interval
+
+      // Trigger vibration on mobile devices if supported and enabled
+      try {
+        if (vibrationEnabled) {
+          const ua = navigator.userAgent || '';
+          const isMobile = /Mobi|Android|iPhone|iPad|iPod/.test(ua);
+          if (isMobile && 'vibrate' in navigator) {
+            // Pattern: vibrate for first note, short gap, vibrate for second
+            (navigator as any).vibrate([120, 30, 90]);
+          }
+        }
+      } catch (e) {
+        // ignore vibration failures
+      }
+    } catch (err) {
+      console.warn('Audio play failed', err);
     }
   };
 
@@ -1191,6 +1397,17 @@ const AuctionPage: React.FC = () => {
                 Esci
               </Button>
             )}
+            {/* Global audio + vibration toggles */}
+            <FormControlLabel
+              control={<Switch checked={soundEnabled} onChange={(e) => setSoundEnabled(e.target.checked)} />}
+              label="Suoni"
+              sx={{ ml: 1 }}
+            />
+            <FormControlLabel
+              control={<Switch checked={vibrationEnabled} onChange={(e) => setVibrationEnabled(e.target.checked)} />}
+              label="Vibrazione"
+              sx={{ ml: 0.5 }}
+            />
           </Box>
         </Box>
       </Paper>
@@ -1924,7 +2141,6 @@ const AuctionPage: React.FC = () => {
                 {/* Selezione Squadra per Offerte Banditore */}
                 <Box>
                   <FormControl fullWidth sx={{ mb: 2 }}>
-                    <InputLabel id="banditore-team-select-label">Seleziona squadra per offerte</InputLabel>
                     <Select
                       labelId="banditore-team-select-label"
                       value={banditoreSelectedTeam?.name || ''}
@@ -1968,6 +2184,25 @@ const AuctionPage: React.FC = () => {
                       </Typography>
                     </Alert>
                   )}
+                </Box>
+
+                {/* Sound controls */}
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Typography variant="body2">Suoni Offerte</Typography>
+                    <Switch checked={soundEnabled} onChange={(e) => setSoundEnabled(e.target.checked)} />
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Typography variant="caption">Vol:</Typography>
+                    <Slider
+                      value={soundVolume}
+                      onChange={(_, v) => setSoundVolume(typeof v === 'number' ? v : (v as number))}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      sx={{ flex: 1 }}
+                    />
+                  </Box>
                 </Box>
                 
                 {/* Alert quando auto-advance è disabilitato */}
