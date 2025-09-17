@@ -1643,23 +1643,7 @@ const AuctionPage: React.FC = () => {
                 Esci
               </Button>
             )}
-            {/* Global audio + vibration toggles */}
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', ml: 1, maxWidth: '100%' }}>
-              <Box sx={{ minWidth: 120, width: { xs: '100%', sm: 'auto' } }}>
-                <FormControlLabel
-                  control={<Switch checked={soundEnabled} onChange={(e) => setSoundEnabled(e.target.checked)} />}
-                  label="Suoni"
-                  sx={{ width: '100%' }}
-                />
-              </Box>
-              <Box sx={{ minWidth: 120, width: { xs: '100%', sm: 'auto' } }}>
-                <FormControlLabel
-                  control={<Switch checked={vibrationEnabled} onChange={(e) => setVibrationEnabled(e.target.checked)} />}
-                  label="Vibrazione"
-                  sx={{ width: '100%' }}
-                />
-              </Box>
-            </Box>
+            {/* (Moved) Global audio + vibration toggles have been relocated to page footer for mobile comfort */}
             {/* Header: global controls only (timeout input moved to banditore panel) */}
           </Box>
         </Box>
@@ -2700,6 +2684,20 @@ const AuctionPage: React.FC = () => {
         >
           Torna alla Home
         </Button>
+      </Box>
+
+      {/* Footer: global audio + vibration toggles (moved from header) */}
+      <Box sx={{ mt: 2, mb: 4, display: 'flex', justifyContent: 'center' }}>
+        <Paper elevation={1} sx={{ p: 1, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+          <FormControlLabel
+            control={<Switch checked={soundEnabled} onChange={(e) => setSoundEnabled(e.target.checked)} />}
+            label="Suoni"
+          />
+          <FormControlLabel
+            control={<Switch checked={vibrationEnabled} onChange={(e) => setVibrationEnabled(e.target.checked)} />}
+            label="Vibrazione"
+          />
+        </Paper>
       </Box>
 
       {/* Custom Bid Dialog */}
