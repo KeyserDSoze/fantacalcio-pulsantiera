@@ -27,6 +27,8 @@ import {
   TableCell,
   TableContainer,
   Snackbar,
+  Checkbox,
+  FormControlLabel,
 } from "@mui/material";
 import { 
   SportsEsports, 
@@ -42,6 +44,8 @@ import {
   Share,
   WhatsApp,
   ContentCopy,
+  ArrowBack,
+  Settings,
 } from "@mui/icons-material";
 import PlayerSearch from "./components/PlayerSearch";
 import msalInstance, { loginRequest } from './msal';
@@ -121,6 +125,9 @@ const AuctionPage: React.FC = () => {
   // Team details modal state
   const [showTeamDetailsDialog, setShowTeamDetailsDialog] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState<TeamInfo | null>(null);
+  // Banditore controls state
+  const [autoAdvanceEnabled, setAutoAdvanceEnabled] = useState(true);
+  const [previousPlayer, setPreviousPlayer] = useState<string | null>(null);
 
   const DEFAULT_TEAM_BUDGET = 1000; // assumiamo budget iniziale se non fornito
 
@@ -273,6 +280,33 @@ const AuctionPage: React.FC = () => {
     });
 
     return grouped;
+  };
+
+  // Funzione per tornare al giocatore precedente
+  const handlePreviousPlayer = async () => {
+    if (!auction || !isBanditore || !previousPlayer) return;
+    
+    if (auction.isLocked) {
+      alert('Asta bloccata, non è possibile cambiare giocatore.');
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, "aste", id!), {
+        currentPlayer: previousPlayer,
+        currentBid: 0,
+        currentBidder: null,
+        isActive: true,
+      });
+      
+      // Resetta il giocatore precedente per evitare loop infiniti
+      setPreviousPlayer(null);
+      
+      // Resetta la ricerca
+      setSearchResetCounter(c => c + 1);
+    } catch (error) {
+      console.error("Errore nel tornare al giocatore precedente:", error);
+    }
   };
 
   const refreshTeams = async () => {
@@ -860,6 +894,9 @@ const AuctionPage: React.FC = () => {
 
       // If API succeeded, update Firestore
       try {
+        // Salva il giocatore corrente come precedente prima di aggiornare
+        setPreviousPlayer(auction.currentPlayer);
+
         await updateDoc(doc(db, "aste", id!), {
           takenPlayers: arrayUnion(auction.currentPlayer),
           currentPlayer: null,
@@ -876,9 +913,8 @@ const AuctionPage: React.FC = () => {
         // Aggiorna lo stato delle squadre per riflettere i nuovi budget
         await refreshTeams();
 
-        // Passa automaticamente al prossimo giocatore dello stesso ruolo
-        // Determina il ruolo del giocatore appena venduto
-        if (currentPlayerData?.Ruolo) {
+        // Passa automaticamente al prossimo giocatore se l'auto-advance è abilitato
+        if (autoAdvanceEnabled && currentPlayerData?.Ruolo) {
           try {
             // Aspetta un attimo per far sì che l'aggiornamento Firestore si propaghi
             setTimeout(() => {
@@ -1635,6 +1671,45 @@ const AuctionPage: React.FC = () => {
                 >
                   Condividi Link Asta
                 </Button>
+
+                {/* Pulsante Giocatore Precedente */}
+                <Button
+                  variant="outlined"
+                  startIcon={<ArrowBack />}
+                  onClick={handlePreviousPlayer}
+                  disabled={auction?.isLocked || !previousPlayer}
+                  color="secondary"
+                >
+                  Giocatore Precedente
+                </Button>
+
+                {/* Checkbox Auto-Advance */}
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={autoAdvanceEnabled}
+                      onChange={(e) => setAutoAdvanceEnabled(e.target.checked)}
+                      color="primary"
+                    />
+                  }
+                  label={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Settings fontSize="small" />
+                      <Typography variant="body2">
+                        Avanza automaticamente al prossimo giocatore
+                      </Typography>
+                    </Box>
+                  }
+                />
+                
+                {/* Alert quando auto-advance è disabilitato */}
+                {!autoAdvanceEnabled && (
+                  <Alert severity="info" sx={{ fontSize: '0.8rem' }}>
+                    <Typography variant="body2">
+                      📋 Auto-advance disabilitato: dovrai premere manualmente "Prossimo" dopo ogni aggiudicazione
+                    </Typography>
+                  </Alert>
+                )}
                 
                 {/* Selezione Ruolo */}
                 <Box>
@@ -1674,7 +1749,7 @@ const AuctionPage: React.FC = () => {
                     currentRoleView === 'Centrocampista' ? 'success' : 'error'
                   }
                 >
-                  {fetchNextLoading ? 'Caricamento...' : `Prossimo ${currentRoleView}`}
+                  {fetchNextLoading ? 'Caricamento...' : `Prossimo ${currentRoleView}${!autoAdvanceEnabled ? ' (Manuale)' : ''}`}
                 </Button>
 
                 {auction?.currentPlayer && (
