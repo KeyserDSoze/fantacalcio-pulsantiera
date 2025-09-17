@@ -717,13 +717,11 @@ const AuctionPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auction?.salesHistory?.length, configReady]);
 
-  // Reset banditore selected team when current player changes
+  // Previously we cleared the banditore-selected team when the current player changed.
+  // Keep the selected team persistent so the banditore continues to bid on the same team across players.
   useEffect(() => {
-    if (isBanditore && auction?.currentPlayer) {
-      setBanditoreSelectedTeam(null);
-    }
     // Always start the offer timer when the current player changes
-    if (auction) {
+  if (auction) {
       if (auction.currentPlayer) {
         // New player: reset first-offer flag and start timer to configured max
         setFirstOfferHappened(false);
