@@ -326,10 +326,16 @@ const AuctionPage: React.FC = () => {
     
     const grouped = players.reduce((acc, player) => {
       // Trova il nome completo del giocatore dai dati allPlayers
-      const fullPlayerData = allPlayers.find(p => 
-        p.Nome.toLowerCase().includes(player.name.toLowerCase()) ||
-        player.name.toLowerCase().includes(p.Nome.toLowerCase())
+      let fullPlayerData = allPlayers.find(p => 
+        p.Nome.toLowerCase() === player.name.toLowerCase() ||
+        player.name.toLowerCase() === p.Nome.toLowerCase()
       );
+
+      if(!fullPlayerData)
+        fullPlayerData = allPlayers.find(p => 
+          p.Nome.toLowerCase().includes(player.name.toLowerCase()) ||
+          player.name.toLowerCase().includes(p.Nome.toLowerCase())
+        );
       
       const playerWithDetails = {
         ...player,
@@ -743,7 +749,7 @@ const AuctionPage: React.FC = () => {
     // Check if this is a new bid from another player (not us)
     if (currentBidder && currentBid !== null && 
         currentBidder !== playerName && // Not from current user
-        currentBidder !== `${playerName} (via Banditore)` && // Not from banditore for current user
+        currentBidder !== `${playerName}` && // Not from banditore for current user
         (currentBidder !== lastBidder || currentBid !== lastBidAmount)) { // Actually a new bid
       
       // Update tracking state
@@ -864,15 +870,38 @@ const AuctionPage: React.FC = () => {
     }
 
     const newBid = auction.currentBid + amount;
-  const bidderName = isBanditore ? "Banditore" : playerName.trim();
+  // If banditore is bidding on behalf of a selected team, prefer recording the team's name (matches participants)
+  // fallback to owner's email, then to current playerName or 'Banditore'
+  const bidderName = isBanditore
+    ? (banditoreSelectedTeam?.name || banditoreSelectedTeam?.owner || playerName.trim() || "Banditore")
+    : playerName.trim();
     
     try {
-      await updateDoc(doc(db, "aste", id!), {
-        currentBid: newBid,
-        currentBidder: bidderName,
-        isActive: true,
-        offerTimerStartedAt: new Date().toISOString(),
-      });
+      // If banditore, try to resolve an email for the selected team
+      if (isBanditore) {
+        let bidderEmail: string | null = null;
+        // Try participants first
+        const participantMatch = auction.participants?.find(p => p.name === (banditoreSelectedTeam?.name));
+        if (participantMatch && (participantMatch as any).email) bidderEmail = (participantMatch as any).email;
+        // Fallback to teams owner email
+        if (!bidderEmail && banditoreSelectedTeam?.owner) bidderEmail = banditoreSelectedTeam.owner;
+
+        await updateDoc(doc(db, "aste", id!), {
+          currentBid: newBid,
+          currentBidder: bidderName,
+          currentBidderEmail: bidderEmail || null,
+          isActive: true,
+          offerTimerStartedAt: new Date().toISOString(),
+        });
+      } else {
+        await updateDoc(doc(db, "aste", id!), {
+          currentBid: newBid,
+          currentBidder: bidderName,
+          currentBidderEmail: null,
+          isActive: true,
+          offerTimerStartedAt: new Date().toISOString(),
+        });
+      }
     } catch (error) {
       console.error("Errore nel fare l'offerta:", error);
     }
@@ -1133,9 +1162,18 @@ const AuctionPage: React.FC = () => {
       }
 
       try {
+        // Prefer storing the team's name (so it matches a participant). Fallback to owner email, then a Banditore label.
+        const bidderLabel = banditoreSelectedTeam?.name || banditoreSelectedTeam?.owner || banditoreSelectedTeam?.name;
+        // Resolve email similarly
+        let bidderEmail: string | null = null;
+        const participantMatch = auction.participants?.find(p => p.name === banditoreSelectedTeam?.name);
+        if (participantMatch && (participantMatch as any).email) bidderEmail = (participantMatch as any).email;
+        if (!bidderEmail && banditoreSelectedTeam?.owner) bidderEmail = banditoreSelectedTeam.owner;
+
         await updateDoc(doc(db, "aste", id!), {
           currentBid: amount,
-          currentBidder: `${banditoreSelectedTeam.name} (Banditore)`,
+          currentBidder: bidderLabel,
+          currentBidderEmail: bidderEmail || null,
           isActive: true,
         });
         // When banditore bids for a team, restart the timer
@@ -1264,15 +1302,18 @@ const AuctionPage: React.FC = () => {
       return;
     }
 
-    // Resolve buyer email by matching currentBidder with participants
-    let buyerEmail: string | null = null;
-    const bidderLabel = auction.currentBidder || 'Base';
-    if (bidderLabel && bidderLabel !== 'Banditore' && bidderLabel !== 'Base') {
-      const matchedParticipant = auction.participants?.find(p => p.name === bidderLabel);
-      if (matchedParticipant && (matchedParticipant as any).email) {
-        buyerEmail = (matchedParticipant as any).email;
-      } else {
-        if (/@/.test(bidderLabel)) buyerEmail = bidderLabel;
+    // Prefer explicit email field saved by banditore actions
+    let buyerEmail: string | null = (auction as any)?.currentBidderEmail || null;
+    // If not present, resolve buyer email by matching currentBidder with participants
+    if (!buyerEmail) {
+      const bidderLabel = auction.currentBidder || 'Base';
+      if (bidderLabel && bidderLabel !== 'Banditore' && bidderLabel !== 'Base') {
+        const matchedParticipant = auction.participants?.find(p => p.name === bidderLabel);
+        if (matchedParticipant && (matchedParticipant as any).email) {
+          buyerEmail = (matchedParticipant as any).email;
+        } else {
+          if (/@/.test(bidderLabel)) buyerEmail = bidderLabel;
+        }
       }
     }
 
@@ -1304,7 +1345,7 @@ const AuctionPage: React.FC = () => {
           currentBid: 0,
           currentBidder: null,
           isActive: false,
-          salesHistory: arrayUnion({ playerName: auction.currentPlayer, price: auction.currentBid, buyer: bidderLabel, buyerEmail: buyerEmail || null })
+          salesHistory: arrayUnion({ playerName: auction.currentPlayer, price: auction.currentBid, buyer: auction.currentBidder || 'Banditore', buyerEmail: buyerEmail || null })
         });
 
         // Stop timer when player is sold
@@ -1538,43 +1579,23 @@ const AuctionPage: React.FC = () => {
               </Button>
             )}
             {/* Global audio + vibration toggles */}
-            <FormControlLabel
-              control={<Switch checked={soundEnabled} onChange={(e) => setSoundEnabled(e.target.checked)} />}
-              label="Suoni"
-              sx={{ ml: 1 }}
-            />
-            <FormControlLabel
-              control={<Switch checked={vibrationEnabled} onChange={(e) => setVibrationEnabled(e.target.checked)} />}
-              label="Vibrazione"
-              sx={{ ml: 0.5 }}
-            />
-            {isBanditore && (
-              <Box sx={{ display: 'flex', alignItems: 'center', ml: 1 }}>
-                <TextField
-                  size="small"
-                  label="Timeout (s)"
-                  value={offerTimeoutInput}
-                  onChange={(e) => setOfferTimeoutInput(e.target.value)}
-                  sx={{ width: 100 }}
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', ml: 1, maxWidth: '100%' }}>
+              <Box sx={{ minWidth: 120, width: { xs: '100%', sm: 'auto' } }}>
+                <FormControlLabel
+                  control={<Switch checked={soundEnabled} onChange={(e) => setSoundEnabled(e.target.checked)} />}
+                  label="Suoni"
+                  sx={{ width: '100%' }}
                 />
-                <Button
-                  size="small"
-                  onClick={async () => {
-                    const v = Number(offerTimeoutInput);
-                    if (isNaN(v) || v <= 0) return alert('Inserisci un numero valido di secondi');
-                    try {
-                      await updateDoc(doc(db, 'aste', id!), { offerTimeoutSeconds: v });
-                      setOfferTimeoutMax(v);
-                      setOfferTimeoutInput(String(v));
-                    } catch (err) {
-                      console.error('Errore nel salvare timeout', err);
-                    }
-                  }}
-                >
-                  Salva
-                </Button>
               </Box>
-            )}
+              <Box sx={{ minWidth: 120, width: { xs: '100%', sm: 'auto' } }}>
+                <FormControlLabel
+                  control={<Switch checked={vibrationEnabled} onChange={(e) => setVibrationEnabled(e.target.checked)} />}
+                  label="Vibrazione"
+                  sx={{ width: '100%' }}
+                />
+              </Box>
+            </Box>
+            {/* Header: global controls only (timeout input moved to banditore panel) */}
           </Box>
         </Box>
       </Paper>
@@ -2062,7 +2083,7 @@ const AuctionPage: React.FC = () => {
                       try {
                         await updateDoc(doc(db, "aste", id!), {
                           currentBid: (auction.currentBid || 0) + amount,
-                          currentBidder: `${banditoreSelectedTeam.name} (Banditore)`,
+                          currentBidder: banditoreSelectedTeam.name,
                           isActive: true,
                           offerTimerStartedAt: new Date().toISOString(),
                         });
@@ -2105,7 +2126,7 @@ const AuctionPage: React.FC = () => {
                       try {
                           await updateDoc(doc(db, "aste", id!), {
                             currentBid: (auction.currentBid || 0) + amount,
-                            currentBidder: `${banditoreSelectedTeam.name} (Banditore)`,
+                            currentBidder: banditoreSelectedTeam.name,
                             isActive: true,
                             offerTimerStartedAt: new Date().toISOString(),
                           });
@@ -2460,10 +2481,37 @@ const AuctionPage: React.FC = () => {
                   startIcon={<Timer />}
                   onClick={handleResetTimer}
                   color="info"
-                  sx={{ ml: 1 }}
                 >
                   Reset Timer
                 </Button>
+                {/* Banditore-only: timeout config */}
+                {isBanditore && (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', maxWidth: { xs: 220, md: 'auto' } }}>
+                    <TextField
+                      size="small"
+                      label="Timeout (s)"
+                      value={offerTimeoutInput}
+                      onChange={(e) => setOfferTimeoutInput(e.target.value)}
+                      sx={{ width: { xs: '100%', sm: 120 } }}
+                    />
+                    <Button
+                      size="small"
+                      onClick={async () => {
+                        const v = Number(offerTimeoutInput);
+                        if (isNaN(v) || v <= 0) return alert('Inserisci un numero valido di secondi');
+                        try {
+                          await updateDoc(doc(db, 'aste', id!), { offerTimeoutSeconds: v });
+                          setOfferTimeoutMax(v);
+                          setOfferTimeoutInput(String(v));
+                        } catch (err) {
+                          console.error('Errore nel salvare timeout', err);
+                        }
+                      }}
+                    >
+                      Salva
+                    </Button>
+                  </Box>
+                )}
               </Box>
             </Paper>
 
