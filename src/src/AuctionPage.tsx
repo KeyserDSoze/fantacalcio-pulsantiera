@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { db } from "./firebase";
-import { doc, onSnapshot, updateDoc, arrayUnion } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc, arrayUnion, runTransaction } from "firebase/firestore";
 import {
   Container,
   Paper,
@@ -909,33 +909,50 @@ const AuctionPage: React.FC = () => {
     : playerName.trim();
     
     try {
-      // If banditore, try to resolve an email for the selected team
-      if (isBanditore) {
-        let bidderEmail: string | null = null;
-        // Try participants first
-        const participantMatch = auction.participants?.find(p => p.name === (banditoreSelectedTeam?.name));
-        if (participantMatch && (participantMatch as any).email) bidderEmail = (participantMatch as any).email;
-        // Fallback to teams owner email
-        if (!bidderEmail && banditoreSelectedTeam?.owner) bidderEmail = banditoreSelectedTeam.owner;
+      const auctionRef = doc(db, "aste", id!);
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(auctionRef as any);
+        const remote = snap.data() as AuctionData | undefined | null;
+        if (!remote) throw new Error('Asta non trovata');
 
-        await updateDoc(doc(db, "aste", id!), {
-          currentBid: newBid,
-          currentBidder: bidderName,
-          currentBidderEmail: bidderEmail || null,
-          isActive: true,
-          offerTimerStartedAt: new Date().toISOString(),
-        });
+        const currentRemoteBid = remote.currentBid || 0;
+        // If remote bid is greater than what we expected (stale UI), abort
+        if (currentRemoteBid !== auction.currentBid) {
+          throw new Error('currentbid-changed');
+        }
+
+        // perform update
+        if (isBanditore) {
+          let bidderEmail: string | null = null;
+          const participantMatch = auction.participants?.find(p => p.name === (banditoreSelectedTeam?.name));
+          if (participantMatch && (participantMatch as any).email) bidderEmail = (participantMatch as any).email;
+          if (!bidderEmail && banditoreSelectedTeam?.owner) bidderEmail = banditoreSelectedTeam.owner;
+
+          tx.update(auctionRef as any, {
+            currentBid: newBid,
+            currentBidder: bidderName,
+            currentBidderEmail: bidderEmail || null,
+            isActive: true,
+            offerTimerStartedAt: new Date().toISOString(),
+          });
+        } else {
+          tx.update(auctionRef as any, {
+            currentBid: newBid,
+            currentBidder: bidderName,
+            currentBidderEmail: null,
+            isActive: true,
+            offerTimerStartedAt: new Date().toISOString(),
+          });
+        }
+      });
+    } catch (error: any) {
+      if (error && error.message === 'currentbid-changed') {
+        setSnackbarSeverity('error');
+        setSnackbarMsg("C'è un'offerta più alta.");
+        setSnackbarOpen(true);
       } else {
-        await updateDoc(doc(db, "aste", id!), {
-          currentBid: newBid,
-          currentBidder: bidderName,
-          currentBidderEmail: null,
-          isActive: true,
-          offerTimerStartedAt: new Date().toISOString(),
-        });
+        console.error('Errore nel fare l\'offerta:', error);
       }
-    } catch (error) {
-      console.error("Errore nel fare l'offerta:", error);
     }
   };
 
@@ -2030,14 +2047,27 @@ const AuctionPage: React.FC = () => {
                     const bidderName = isBanditore ? "Banditore" : playerName.trim();
                     
                     try {
-                      await updateDoc(doc(db, "aste", id!), {
-                        currentBid: fixedAmount,
-                        currentBidder: bidderName,
-                        isActive: true,
-                        offerTimerStartedAt: new Date().toISOString(),
+                      const auctionRef = doc(db, "aste", id!);
+                      await runTransaction(db, async (tx) => {
+                        const snap = await tx.get(auctionRef as any);
+                        const remote = snap.data() as AuctionData | undefined | null;
+                        if (!remote) throw new Error('Asta non trovata');
+                        if ((remote.currentBid || 0) !== auction.currentBid) throw new Error('currentbid-changed');
+                        tx.update(auctionRef as any, {
+                          currentBid: fixedAmount,
+                          currentBidder: bidderName,
+                          isActive: true,
+                          offerTimerStartedAt: new Date().toISOString(),
+                        });
                       });
-                    } catch (error) {
-                      console.error("Errore nel fare l'offerta:", error);
+                    } catch (error: any) {
+                      if (error && error.message === 'currentbid-changed') {
+                        setSnackbarSeverity('error');
+                        setSnackbarMsg("L'offerta è cambiata: aggiorna la pagina o verifica l'offerta corrente prima di riprovare.");
+                        setSnackbarOpen(true);
+                      } else {
+                        console.error("Errore nel fare l'offerta:", error);
+                      }
                     }
                   }}
                   disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder() || fixedAmount <= (auction?.currentBid || 0) || isTemporarilyBlocked}
@@ -2126,16 +2156,28 @@ const AuctionPage: React.FC = () => {
                       }
 
                       try {
-                        await updateDoc(doc(db, "aste", id!), {
-                          currentBid: (auction.currentBid || 0) + amount,
-                          currentBidder: banditoreSelectedTeam.name,
-                          isActive: true,
-                          offerTimerStartedAt: new Date().toISOString(),
+                        const auctionRef = doc(db, "aste", id!);
+                        await runTransaction(db, async (tx) => {
+                          const snap = await tx.get(auctionRef as any);
+                          const remote = snap.data() as AuctionData | undefined | null;
+                          if (!remote) throw new Error('Asta non trovata');
+                          if ((remote.currentBid || 0) !== auction.currentBid) throw new Error('currentbid-changed');
+                          tx.update(auctionRef as any, {
+                            currentBid: (auction.currentBid || 0) + amount,
+                            currentBidder: banditoreSelectedTeam.name,
+                            isActive: true,
+                            offerTimerStartedAt: new Date().toISOString(),
+                          });
                         });
-                        // set persistent local block for banditore until another bidder appears
                         setIsTemporarilyBlockedForBanditore(true);
-                      } catch (error) {
-                        console.error("Errore nel fare l'offerta per la squadra:", error);
+                      } catch (error: any) {
+                        if (error && error.message === 'currentbid-changed') {
+                          setSnackbarSeverity('error');
+                          setSnackbarMsg("L'offerta è cambiata: aggiorna la pagina o verifica l'offerta corrente prima di riprovare.");
+                          setSnackbarOpen(true);
+                        } else {
+                          console.error("Errore nel fare l'offerta per la squadra:", error);
+                        }
                       }
                     }}
                     disabled={auction?.isLocked || !auction?.currentPlayer || isTemporarilyBlockedForBanditore}
@@ -2174,16 +2216,28 @@ const AuctionPage: React.FC = () => {
                       }
 
                       try {
-                          await updateDoc(doc(db, "aste", id!), {
-                            currentBid: (auction.currentBid || 0) + amount,
-                            currentBidder: banditoreSelectedTeam.name,
-                            isActive: true,
-                            offerTimerStartedAt: new Date().toISOString(),
+                          const auctionRef = doc(db, "aste", id!);
+                          await runTransaction(db, async (tx) => {
+                            const snap = await tx.get(auctionRef as any);
+                            const remote = snap.data() as AuctionData | undefined | null;
+                            if (!remote) throw new Error('Asta non trovata');
+                            if ((remote.currentBid || 0) !== auction.currentBid) throw new Error('currentbid-changed');
+                            tx.update(auctionRef as any, {
+                              currentBid: (auction.currentBid || 0) + amount,
+                              currentBidder: banditoreSelectedTeam.name,
+                              isActive: true,
+                              offerTimerStartedAt: new Date().toISOString(),
+                            });
                           });
-                          // set persistent local block for banditore until another bidder appears
                           setIsTemporarilyBlockedForBanditore(true);
-                      } catch (error) {
-                        console.error("Errore nel fare l'offerta per la squadra:", error);
+                      } catch (error: any) {
+                        if (error && error.message === 'currentbid-changed') {
+                          setSnackbarSeverity('error');
+                          setSnackbarMsg("L'offerta è cambiata: aggiorna la pagina o verifica l'offerta corrente prima di riprovare.");
+                          setSnackbarOpen(true);
+                        } else {
+                          console.error("Errore nel fare l'offerta per la squadra:", error);
+                        }
                       }
                     }}
                     disabled={auction?.isLocked || !auction?.currentPlayer || isTemporarilyBlockedForBanditore}
