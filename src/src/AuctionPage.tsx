@@ -138,6 +138,8 @@ const AuctionPage: React.FC = () => {
   
   // Temporary block state for bid buttons when other players bid
   const [isTemporarilyBlocked, setIsTemporarilyBlocked] = useState(false);
+  // Temporary block specifically for the banditore after he/she places an impersonated bid
+  const [isTemporarilyBlockedForBanditore, setIsTemporarilyBlockedForBanditore] = useState(false);
   const [lastBidder, setLastBidder] = useState<string | null>(null);
   const [lastBidAmount, setLastBidAmount] = useState<number | null>(null);
 
@@ -728,8 +730,9 @@ const AuctionPage: React.FC = () => {
         setTimerSecondsLeft(offerTimeoutMax);
         setTimerExpired(false);
         setTimerRunning(true);
-        // clear any transient block when switching players
-        setIsTemporarilyBlocked(false);
+  // clear any transient block when switching players
+  setIsTemporarilyBlocked(false);
+  setIsTemporarilyBlockedForBanditore(false);
       } else {
         // No current player: stop timer
         setTimerRunning(false);
@@ -769,6 +772,35 @@ const AuctionPage: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [auction?.currentBidder, auction?.currentBid, playerName, lastBidder, lastBidAmount, isDisplayView, isBanditore, (auction as any)?.offerTimerStartedAt, timerRunning]);
+
+  // When banditore places an impersonated bid, briefly block banditore buttons to avoid double-click races
+  // We detect changes to auction.currentBidder/currentBid and if the last bidder equals the selected team name
+  useEffect(() => {
+    if (!auction || !isBanditore || !banditoreSelectedTeam) return;
+
+    const currentBidder = auction.currentBidder;
+    const currentBid = auction.currentBid;
+
+    if (currentBidder && currentBid !== null && currentBidder === banditoreSelectedTeam.name && (currentBidder !== lastBidder || currentBid !== lastBidAmount)) {
+      // Update tracking state
+      setLastBidder(currentBidder);
+      setLastBidAmount(currentBid);
+
+      // Activate persistent block for banditore: keep blocked until someone else makes a bid
+      setIsTemporarilyBlockedForBanditore(true);
+      // Do not auto-clear here; another effect will clear the block when auction.currentBidder changes to someone else
+    }
+  }, [auction?.currentBidder, auction?.currentBid, isBanditore, banditoreSelectedTeam, lastBidder, lastBidAmount]);
+
+  // Clear banditore block when a new bidder different from the selected team places a bid
+  useEffect(() => {
+    if (!auction || !isBanditore || !banditoreSelectedTeam) return;
+    const currentBidder = auction.currentBidder;
+    if (!currentBidder) return;
+    if (currentBidder !== banditoreSelectedTeam.name) {
+      setIsTemporarilyBlockedForBanditore(false);
+    }
+  }, [auction?.currentBidder, isBanditore, banditoreSelectedTeam]);
 
   // Start/restart the offer timer on any new bid (for everyone). The timer only starts after the first offer.
   useEffect(() => {
@@ -1092,6 +1124,12 @@ const AuctionPage: React.FC = () => {
       return;
     }
 
+    // If banditore has just placed an impersonated bid, briefly block banditore buttons too
+    if (isBanditore && isTemporarilyBlockedForBanditore) {
+      alert('Azione temporaneamente disabilitata dopo il rilancio del banditore.');
+      return;
+    }
+
     // Controllo limite ruoli - stesso controllo di handleBid
     if (playerEmail && currentPlayerData) {
       const canTake = canUserTakePlayerRole(playerEmail, currentPlayerData.Ruolo);
@@ -1129,6 +1167,10 @@ const AuctionPage: React.FC = () => {
         isActive: true,
         offerTimerStartedAt: new Date().toISOString(),
       });
+      // If the banditore made a custom bid impersonating a team, set a persistent local block until someone else bids
+      if (isBanditore && banditoreSelectedTeam) {
+        setIsTemporarilyBlockedForBanditore(true);
+      }
       setShowCustomDialog(false);
       setCustomBid("");
     } catch (error) {
@@ -1183,6 +1225,8 @@ const AuctionPage: React.FC = () => {
         setTimerRunning(true);
         setShowCustomDialog(false);
         setCustomBid("");
+  // set persistent local block to prevent banditore from re-bidding for the same team
+  setIsTemporarilyBlockedForBanditore(true);
       } catch (error) {
         console.error("Errore nel fare l'offerta per la squadra:", error);
       }
@@ -2070,6 +2114,7 @@ const AuctionPage: React.FC = () => {
                     size="medium"
                     onClick={async () => {
                       if (!auction?.currentPlayer) return;
+                      if (isTemporarilyBlockedForBanditore) return;
                       
                       // Controllo limite ruoli per la squadra selezionata
                       if (currentPlayerData && banditoreSelectedTeam) {
@@ -2087,16 +2132,20 @@ const AuctionPage: React.FC = () => {
                           isActive: true,
                           offerTimerStartedAt: new Date().toISOString(),
                         });
+                        // set persistent local block for banditore until another bidder appears
+                        setIsTemporarilyBlockedForBanditore(true);
                       } catch (error) {
                         console.error("Errore nel fare l'offerta per la squadra:", error);
                       }
                     }}
-                    disabled={auction?.isLocked || !auction?.currentPlayer}
+                    disabled={auction?.isLocked || !auction?.currentPlayer || isTemporarilyBlockedForBanditore}
                     sx={{ 
                       py: { xs: 1.5, sm: 2 },
                       fontSize: { xs: '1.6rem', sm: '1.7rem' },
                       minHeight: { xs: '80px', sm: '88px' },
                       backgroundColor: 'warning.main',
+                      filter: isTemporarilyBlockedForBanditore ? 'blur(1px)' : 'none',
+                      opacity: isTemporarilyBlockedForBanditore ? 0.7 : 1,
                       '&:hover': { backgroundColor: 'warning.dark' }
                     }}
                   >
@@ -2113,6 +2162,7 @@ const AuctionPage: React.FC = () => {
                     size="medium"
                     onClick={async () => {
                       if (!auction?.currentPlayer) return;
+                      if (isTemporarilyBlockedForBanditore) return;
                       
                       // Controllo limite ruoli per la squadra selezionata  
                       if (currentPlayerData && banditoreSelectedTeam) {
@@ -2130,15 +2180,19 @@ const AuctionPage: React.FC = () => {
                             isActive: true,
                             offerTimerStartedAt: new Date().toISOString(),
                           });
+                          // set persistent local block for banditore until another bidder appears
+                          setIsTemporarilyBlockedForBanditore(true);
                       } catch (error) {
                         console.error("Errore nel fare l'offerta per la squadra:", error);
                       }
                     }}
-                    disabled={auction?.isLocked || !auction?.currentPlayer}
+                    disabled={auction?.isLocked || !auction?.currentPlayer || isTemporarilyBlockedForBanditore}
                     sx={{ 
                       py: { xs: 1.5, sm: 2 },
                       fontSize: { xs: '0.7rem', sm: '0.8rem' },
                       minHeight: { xs: '40px', sm: '48px' },
+                      filter: isTemporarilyBlockedForBanditore ? 'blur(1px)' : 'none',
+                      opacity: isTemporarilyBlockedForBanditore ? 0.7 : 1,
                       backgroundColor: 'warning.main',
                       '&:hover': { backgroundColor: 'warning.dark' }
                     }}
