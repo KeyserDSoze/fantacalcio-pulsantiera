@@ -823,6 +823,8 @@ const AuctionPage: React.FC = () => {
   if (!auction || !hasJoined || auction.isLocked || !auction.currentPlayer || isDisplayView) return;
   // If timer expired, only banditore can act
   if (timerExpired && !isBanditore) return;
+  // Temporary block after external offers: participants cannot bid for a short period
+  if (isTemporarilyBlocked && !isBanditore) return;
     
     // Controllo limite ruoli - verifica se l'utente può prendere questo giocatore
     if (playerEmail && currentPlayerData) {
@@ -1035,6 +1037,12 @@ const AuctionPage: React.FC = () => {
     // If timer expired, only banditore can make custom bid
     if (timerExpired && !isBanditore) {
       alert('Tempo scaduto: solo il banditore può confermare o resettare.');
+      return;
+    }
+
+    // Temporary block after external offers: participants cannot make custom bids briefly
+    if (isTemporarilyBlocked && !isBanditore) {
+      alert('Offerta in arrivo: attendi qualche istante prima di rilanciare.');
       return;
     }
 
