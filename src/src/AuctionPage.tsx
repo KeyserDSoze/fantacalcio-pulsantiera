@@ -118,6 +118,9 @@ const AuctionPage: React.FC = () => {
   const [teamsError, setTeamsError] = useState<string | null>(null);
   const [teamsInitialLoad, setTeamsInitialLoad] = useState(true);
   const [teamsRefreshing, setTeamsRefreshing] = useState(false);
+  // Team details modal state
+  const [showTeamDetailsDialog, setShowTeamDetailsDialog] = useState(false);
+  const [selectedTeam, setSelectedTeam] = useState<TeamInfo | null>(null);
 
   const DEFAULT_TEAM_BUDGET = 1000; // assumiamo budget iniziale se non fornito
 
@@ -215,6 +218,61 @@ const AuctionPage: React.FC = () => {
     
     // Confronta il nome del giocatore con il currentBidder
     return auction.currentBidder === playerName.trim();
+  };
+
+  // Funzione per aprire la modale dei dettagli della squadra
+  const handleTeamClick = (team: TeamInfo) => {
+    setSelectedTeam(team);
+    setShowTeamDetailsDialog(true);
+  };
+
+  // Funzione per organizzare i giocatori per ruolo
+  const organizePlayersByRole = (players: TeamInfo['players']) => {
+    if (!players) return { portieri: [], difensori: [], centrocampisti: [], attaccanti: [] };
+    
+    const grouped = players.reduce((acc, player) => {
+      // Trova il nome completo del giocatore dai dati allPlayers
+      const fullPlayerData = allPlayers.find(p => 
+        p.Nome.toLowerCase().includes(player.name.toLowerCase()) ||
+        player.name.toLowerCase().includes(p.Nome.toLowerCase())
+      );
+      
+      const playerWithDetails = {
+        ...player,
+        fullName: fullPlayerData?.Nome || player.name,
+        squadra: fullPlayerData?.Squadra || '—',
+        media: fullPlayerData?.Media || 0,
+        fantaMedia: fullPlayerData?.FantaMedia || 0,
+      };
+      
+      switch (player.role) {
+        case 0:
+          acc.portieri.push(playerWithDetails);
+          break;
+        case 1:
+          acc.difensori.push(playerWithDetails);
+          break;
+        case 2:
+          acc.centrocampisti.push(playerWithDetails);
+          break;
+        case 3:
+          acc.attaccanti.push(playerWithDetails);
+          break;
+      }
+      return acc;
+    }, {
+      portieri: [] as Array<TeamInfo['players'][0] & { fullName: string; squadra: string; media: number; fantaMedia: number }>,
+      difensori: [] as Array<TeamInfo['players'][0] & { fullName: string; squadra: string; media: number; fantaMedia: number }>,
+      centrocampisti: [] as Array<TeamInfo['players'][0] & { fullName: string; squadra: string; media: number; fantaMedia: number }>,
+      attaccanti: [] as Array<TeamInfo['players'][0] & { fullName: string; squadra: string; media: number; fantaMedia: number }>,
+    });
+
+    // Ordina alfabeticamente per nome completo
+    Object.keys(grouped).forEach(role => {
+      grouped[role as keyof typeof grouped].sort((a, b) => a.fullName.localeCompare(b.fullName));
+    });
+
+    return grouped;
   };
 
   const refreshTeams = async () => {
@@ -1490,12 +1548,18 @@ const AuctionPage: React.FC = () => {
                       <Paper 
                         key={t.owner || t.name || idx} 
                         elevation={isCurrentUserTeam ? 3 : 1} 
+                        onClick={() => handleTeamClick(t)}
                         sx={{ 
                           p: 2,
                           backgroundColor: teamsRefreshing ? 'primary.light' : 'background.paper',
                           transition: 'background-color 0.3s ease-in-out, transform 0.3s ease-in-out',
                           border: isCurrentUserTeam ? '2px solid' : 'none',
                           borderColor: isCurrentUserTeam ? 'primary.main' : 'transparent',
+                          cursor: 'pointer',
+                          '&:hover': {
+                            backgroundColor: 'action.hover',
+                            transform: 'scale(1.02)',
+                          }
                         }}
                       >
                         <Typography variant="subtitle2" fontWeight="bold">
@@ -1887,6 +1951,157 @@ const AuctionPage: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowTakenDialog(false)}>Chiudi</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Team Details Dialog */}
+      <Dialog 
+        open={showTeamDetailsDialog} 
+        onClose={() => setShowTeamDetailsDialog(false)} 
+        maxWidth="md" 
+        fullWidth
+        PaperProps={{
+          sx: { minHeight: '70vh', maxHeight: '85vh' }
+        }}
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Group />
+            {selectedTeam?.name}
+            <Chip 
+              label={`${selectedTeam?.players?.length || 0} giocatori`} 
+              size="small" 
+              color="primary" 
+            />
+          </Box>
+          <Typography variant="body2" color="text.secondary">
+            Proprietario: {selectedTeam?.owner || '—'}
+          </Typography>
+        </DialogTitle>
+        <DialogContent sx={{ pb: 1 }}>
+          {(() => {
+            if (!selectedTeam?.players || selectedTeam.players.length === 0) {
+              return (
+                <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <Typography variant="h6" color="text.secondary">
+                    Nessun giocatore acquisito
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Questa squadra non ha ancora acquistato giocatori
+                  </Typography>
+                </Box>
+              );
+            }
+
+            const organized = organizePlayersByRole(selectedTeam.players);
+            const roles = [
+              { key: 'portieri', name: 'Portieri', color: 'warning', icon: '🥅' },
+              { key: 'difensori', name: 'Difensori', color: 'primary', icon: '🛡️' },
+              { key: 'centrocampisti', name: 'Centrocampisti', color: 'success', icon: '⚽' },
+              { key: 'attaccanti', name: 'Attaccanti', color: 'error', icon: '🏃‍♂️' },
+            ] as const;
+
+            return (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {roles.map(role => {
+                  const players = organized[role.key];
+                  if (players.length === 0) return null;
+
+                  return (
+                    <Paper key={role.key} elevation={1} sx={{ p: 2 }}>
+                      <Typography 
+                        variant="h6" 
+                        sx={{ 
+                          mb: 2, 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: 1,
+                          color: `${role.color}.main`
+                        }}
+                      >
+                        {role.icon} {role.name} ({players.length})
+                      </Typography>
+                      
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        {players.map((player, idx) => {
+                          // Trova il prezzo dal salesHistory
+                          const sale = auction?.salesHistory?.find(s => 
+                            s.playerName.toLowerCase() === player.fullName.toLowerCase() ||
+                            s.playerName.toLowerCase() === player.name.toLowerCase()
+                          );
+                          
+                          return (
+                            <Box 
+                              key={`${player.name}-${idx}`}
+                              sx={{ 
+                                display: 'grid',
+                                gridTemplateColumns: { xs: '1fr auto', sm: '2fr 1fr 1fr auto' },
+                                gap: 1,
+                                alignItems: 'center',
+                                p: 1.5,
+                                backgroundColor: 'grey.50',
+                                borderRadius: 1,
+                                border: '1px solid',
+                                borderColor: 'grey.200'
+                              }}
+                            >
+                              <Box>
+                                <Typography variant="body1" fontWeight="bold">
+                                  {player.fullName}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {player.squadra}
+                                </Typography>
+                              </Box>
+                              
+                              <Box sx={{ display: { xs: 'none', sm: 'block' }, textAlign: 'center' }}>
+                                <Typography variant="body2" color="text.secondary">
+                                  Media: {player.media > 0 ? player.media.toFixed(1) : '—'}
+                                </Typography>
+                              </Box>
+                              
+                              <Box sx={{ display: { xs: 'none', sm: 'block' }, textAlign: 'center' }}>
+                                <Typography variant="body2" color="text.secondary">
+                                  FM: {player.fantaMedia > 0 ? player.fantaMedia.toFixed(1) : '—'}
+                                </Typography>
+                              </Box>
+                              
+                              <Box sx={{ textAlign: 'right' }}>
+                                <Chip 
+                                  label={sale ? `$${sale.price}` : '$—'} 
+                                  color={role.color}
+                                  size="small"
+                                  variant="outlined"
+                                />
+                              </Box>
+                            </Box>
+                          );
+                        })}
+                      </Box>
+                    </Paper>
+                  );
+                })}
+                
+                {/* Riepilogo Budget */}
+                <Paper elevation={2} sx={{ p: 2, backgroundColor: 'primary.light', color: 'primary.contrastText' }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="h6">
+                      💰 Budget Rimanente
+                    </Typography>
+                    <Typography variant="h5" fontWeight="bold">
+                      ${DEFAULT_TEAM_BUDGET - (typeof selectedTeam?.cost === 'number' ? selectedTeam.cost : 0)}
+                    </Typography>
+                  </Box>
+                  <Typography variant="body2" sx={{ mt: 1, opacity: 0.8 }}>
+                    Spesi: ${typeof selectedTeam?.cost === 'number' ? selectedTeam.cost : 0} / ${DEFAULT_TEAM_BUDGET}
+                  </Typography>
+                </Paper>
+              </Box>
+            );
+          })()}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowTeamDetailsDialog(false)}>Chiudi</Button>
         </DialogActions>
       </Dialog>
 
