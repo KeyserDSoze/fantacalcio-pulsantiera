@@ -714,7 +714,24 @@ const AuctionPage: React.FC = () => {
     if (isBanditore && auction?.currentPlayer) {
       setBanditoreSelectedTeam(null);
     }
-  }, [auction?.currentPlayer, isBanditore]);
+    // Always start the offer timer when the current player changes
+    if (auction) {
+      if (auction.currentPlayer) {
+        // New player: reset first-offer flag and start timer to configured max
+        setFirstOfferHappened(false);
+        setTimerSecondsLeft(offerTimeoutMax);
+        setTimerExpired(false);
+        setTimerRunning(true);
+        // clear any transient block when switching players
+        setIsTemporarilyBlocked(false);
+      } else {
+        // No current player: stop timer
+        setTimerRunning(false);
+        setTimerExpired(false);
+        setTimerSecondsLeft(0);
+      }
+    }
+  }, [auction?.currentPlayer, isBanditore, offerTimeoutMax]);
 
   // Temporary block bid buttons when other players make bids
   useEffect(() => {
