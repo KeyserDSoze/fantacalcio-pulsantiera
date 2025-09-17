@@ -659,7 +659,7 @@ const AuctionPage: React.FC = () => {
       // Activate temporary block
       setIsTemporarilyBlocked(true);
       
-      // Remove block after 500ms
+      // Remove block after 1000ms
       const timer = setTimeout(() => {
         setIsTemporarilyBlocked(false);
       }, 1000);
