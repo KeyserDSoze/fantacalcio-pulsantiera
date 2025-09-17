@@ -1521,6 +1521,8 @@ const AuctionPage: React.FC = () => {
         isActive: true,
         offerTimerStartedAt: new Date().toISOString(),
       });
+      // allow banditore to act again after full reset
+      setIsTemporarilyBlockedForBanditore(false);
     } catch (error) {
       console.error("Errore nel reset dell'asta:", error);
     }
@@ -1541,6 +1543,8 @@ const AuctionPage: React.FC = () => {
       setTimerExpired(false);
       setTimerRunning(true);
       setIsTemporarilyBlocked(false);
+      // also clear banditore persistent block so banditore can bid again after reset
+      setIsTemporarilyBlockedForBanditore(false);
     } catch (error) {
       console.error("Errore nel reset del timer:", error);
     }
@@ -2656,33 +2660,27 @@ const AuctionPage: React.FC = () => {
         )}
       </Box>
 
-      {/* Fixed bottom-right timer */}
+      {/* Fixed bottom-right timer (icon + seconds). Seconds turn red on expiry. */}
       <Box sx={{ position: 'fixed', right: 16, bottom: 16, zIndex: 1400 }}>
-        <Paper elevation={6} sx={{ p: 1.5, minWidth: 160, display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="subtitle2">Timer Offerta</Typography>
-            <Typography variant="h6" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+        <Paper elevation={6} sx={{ p: 1.5, minWidth: 90, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Timer color="action" />
+            <Typography variant="h6" sx={{ fontVariantNumeric: 'tabular-nums', color: timerExpired ? 'error.main' : 'text.primary' }}>
               {firstOfferHappened ? `${timerSecondsLeft}s` : '—'}
             </Typography>
-            {timerExpired && <Typography variant="caption" color="error">Tempo scaduto</Typography>}
           </Box>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {/* If expired, show banditore-only actions */}
+            {/* If expired, show banditore-only actions; hide waiting text for participants */}
             {timerExpired ? (
               isBanditore ? (
                 <>
                   <Button size="small" variant="outlined" onClick={handleResetTimer}>Reset Timer</Button>
                   <Button size="small" variant="contained" color="primary" onClick={async () => {
-                    // Confirm: call existing handlePlayerSold
                     await handlePlayerSold();
                   }}>Conferma</Button>
                 </>
-              ) : (
-                <Typography variant="caption">In attesa banditore</Typography>
-              )
-            ) : (
-              <></>
-            )}
+              ) : null
+            ) : null}
           </Box>
         </Paper>
       </Box>
