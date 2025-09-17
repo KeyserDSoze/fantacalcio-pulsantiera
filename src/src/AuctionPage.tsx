@@ -29,6 +29,10 @@ import {
   Snackbar,
   Checkbox,
   FormControlLabel,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
 } from "@mui/material";
 import { 
   SportsEsports, 
@@ -128,6 +132,7 @@ const AuctionPage: React.FC = () => {
   // Banditore controls state
   const [autoAdvanceEnabled, setAutoAdvanceEnabled] = useState(true);
   const [previousPlayer, setPreviousPlayer] = useState<string | null>(null);
+  const [banditoreSelectedTeam, setBanditoreSelectedTeam] = useState<TeamInfo | null>(null);
 
   const DEFAULT_TEAM_BUDGET = 1000; // assumiamo budget iniziale se non fornito
 
@@ -622,6 +627,13 @@ const AuctionPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auction?.salesHistory?.length, configReady]);
 
+  // Reset banditore selected team when current player changes
+  useEffect(() => {
+    if (isBanditore && auction?.currentPlayer) {
+      setBanditoreSelectedTeam(null);
+    }
+  }, [auction?.currentPlayer, isBanditore]);
+
   const handleJoinAsPlayer = async () => {
     if (!playerName.trim() || !auction) return;
     
@@ -748,6 +760,44 @@ const AuctionPage: React.FC = () => {
       console.error("Errore nel fare l'offerta:", error);
     }
   };
+
+  const handleBanditoreCustomBid = async () => {
+    // Prevent custom bids when there's no player in auction or auction is locked
+    // Only allow if banditore has selected a team
+    if (!auction || auction.isLocked || !auction.currentPlayer || !isBanditore || !banditoreSelectedTeam) {
+        alert("Non ci sono giocatori in asta o non hai selezionato una squadra");
+        return;
+      }
+
+      // Controllo limite ruoli per la squadra selezionata dal banditore
+      if (currentPlayerData && banditoreSelectedTeam) {
+        const canTake = canUserTakePlayerRole(banditoreSelectedTeam.owner || '', currentPlayerData.Ruolo);
+        if (!canTake) {
+          alert(`${banditoreSelectedTeam.name} non può prendere altri ${currentPlayerData.Ruolo.toLowerCase()} - ha già raggiunto il limite di ruolo!`);
+          return;
+        }
+      }
+
+      const amount = parseInt(customBid);
+      if (isNaN(amount) || amount <= 0) return;
+
+      if (amount <= auction.currentBid) {
+        alert("L'offerta deve essere maggiore di quella corrente");
+        return;
+      }
+
+      try {
+        await updateDoc(doc(db, "aste", id!), {
+          currentBid: amount,
+          currentBidder: `${banditoreSelectedTeam.name} (Banditore)`,
+          isActive: true,
+        });
+        setShowCustomDialog(false);
+        setCustomBid("");
+      } catch (error) {
+        console.error("Errore nel fare l'offerta per la squadra:", error);
+      }
+    };
 
   const handleSetPlayer = async () => {
     if (!currentPlayerName.trim() || !auction) return;
@@ -1407,7 +1457,7 @@ const AuctionPage: React.FC = () => {
             </Paper>
           )}
 
-          {/* Bid Buttons - hidden in display view, for banditore, and for users without valid team */}
+          {/* Bid Buttons - for regular participants with valid team */}
           {!isDisplayView && !isBanditore && userHasValidTeam() && (
             <Paper elevation={2} sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom sx={{ fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
@@ -1537,6 +1587,120 @@ const AuctionPage: React.FC = () => {
                 </Alert>
               )}
               
+            </Paper>
+          )}
+
+          {/* Banditore Bid Buttons - when team is selected */}
+          {!isDisplayView && isBanditore && banditoreSelectedTeam && (
+            <Paper elevation={2} sx={{ p: 2, backgroundColor: 'warning.light' }}>
+              <Typography variant="h6" gutterBottom sx={{ fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
+                🔨 Offerte per: {banditoreSelectedTeam.name}
+              </Typography>
+              
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Stai facendo offerte come banditore per conto di: <strong>{banditoreSelectedTeam.name}</strong>
+              </Alert>
+              
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(2, 1fr)' }, gap: 1, mb: 2 }}>
+                {[1, 3].map((amount) => (
+                  <Button
+                    key={amount}
+                    variant="contained"
+                    size="medium"
+                    onClick={async () => {
+                      if (!auction?.currentPlayer) return;
+                      
+                      // Controllo limite ruoli per la squadra selezionata
+                      if (currentPlayerData && banditoreSelectedTeam) {
+                        const canTake = canUserTakePlayerRole(banditoreSelectedTeam.owner || '', currentPlayerData.Ruolo);
+                        if (!canTake) {
+                          alert(`${banditoreSelectedTeam.name} non può prendere altri ${currentPlayerData.Ruolo.toLowerCase()} - ha già raggiunto il limite di ruolo!`);
+                          return;
+                        }
+                      }
+
+                      try {
+                        await updateDoc(doc(db, "aste", id!), {
+                          currentBid: (auction.currentBid || 0) + amount,
+                          currentBidder: `${banditoreSelectedTeam.name} (Banditore)`,
+                          isActive: true,
+                        });
+                      } catch (error) {
+                        console.error("Errore nel fare l'offerta per la squadra:", error);
+                      }
+                    }}
+                    disabled={auction?.isLocked || !auction?.currentPlayer}
+                    sx={{ 
+                      py: { xs: 1.5, sm: 2 },
+                      fontSize: { xs: '1.6rem', sm: '1.7rem' },
+                      minHeight: { xs: '80px', sm: '88px' },
+                      backgroundColor: 'warning.main',
+                      '&:hover': { backgroundColor: 'warning.dark' }
+                    }}
+                  >
+                    {amount === 1 ? `Incremento`: `+${amount}`} ({(auction?.currentBid || 0) + amount})
+                  </Button>
+                ))}
+              </Box>
+              
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(4, 1fr)', sm: 'repeat(6, 1fr)' }, gap: 1, mb: 2 }}>
+                {[2, 4, 5, 6, 7, 8, 10, 15, 20, 25, 50, 100].map((amount) => (
+                  <Button
+                    key={amount}
+                    variant="contained"
+                    size="medium"
+                    onClick={async () => {
+                      if (!auction?.currentPlayer) return;
+                      
+                      // Controllo limite ruoli per la squadra selezionata  
+                      if (currentPlayerData && banditoreSelectedTeam) {
+                        const canTake = canUserTakePlayerRole(banditoreSelectedTeam.owner || '', currentPlayerData.Ruolo);
+                        if (!canTake) {
+                          alert(`${banditoreSelectedTeam.name} non può prendere altri ${currentPlayerData.Ruolo.toLowerCase()} - ha già raggiunto il limite di ruolo!`);
+                          return;
+                        }
+                      }
+
+                      try {
+                        await updateDoc(doc(db, "aste", id!), {
+                          currentBid: (auction.currentBid || 0) + amount,
+                          currentBidder: `${banditoreSelectedTeam.name} (Banditore)`,
+                          isActive: true,
+                        });
+                      } catch (error) {
+                        console.error("Errore nel fare l'offerta per la squadra:", error);
+                      }
+                    }}
+                    disabled={auction?.isLocked || !auction?.currentPlayer}
+                    sx={{ 
+                      py: { xs: 1.5, sm: 2 },
+                      fontSize: { xs: '0.7rem', sm: '0.8rem' },
+                      minHeight: { xs: '40px', sm: '48px' },
+                      backgroundColor: 'warning.main',
+                      '&:hover': { backgroundColor: 'warning.dark' }
+                    }}
+                  >
+                    +${amount} ({(auction?.currentBid || 0) + amount})
+                  </Button>
+                ))}
+              </Box>
+
+              <Button
+                fullWidth
+                variant="outlined"
+                size="large"
+                startIcon={<Euro />}
+                onClick={() => setShowCustomDialog(true)}
+                disabled={auction?.isLocked || !auction?.currentPlayer}
+                sx={{ 
+                  py: { xs: 1.5, sm: 2 },
+                  borderColor: 'warning.main',
+                  color: 'warning.main',
+                  '&:hover': { borderColor: 'warning.dark', backgroundColor: 'warning.light' }
+                }}
+              >
+                Offerta Personalizzata
+              </Button>
             </Paper>
           )}
             
@@ -1702,6 +1866,55 @@ const AuctionPage: React.FC = () => {
                   }
                 />
                 
+                {/* Selezione Squadra per Offerte Banditore */}
+                <Box>
+                  <FormControl fullWidth sx={{ mb: 2 }}>
+                    <InputLabel id="banditore-team-select-label">Seleziona squadra per offerte</InputLabel>
+                    <Select
+                      labelId="banditore-team-select-label"
+                      value={banditoreSelectedTeam?.name || ''}
+                      label="Seleziona squadra per offerte"
+                      onChange={(e) => {
+                        const selectedTeamName = e.target.value;
+                        if (selectedTeamName === '') {
+                          setBanditoreSelectedTeam(null);
+                        } else {
+                          const team = teams?.find((t: TeamInfo) => t.name === selectedTeamName);
+                          setBanditoreSelectedTeam(team || null);
+                        }
+                      }}
+                      displayEmpty
+                    >
+                      <MenuItem value="">
+                        <em>Nessuna squadra selezionata</em>
+                      </MenuItem>
+                      {teams?.map((team: TeamInfo) => (
+                        <MenuItem key={team.name} value={team.name}>
+                          {team.name}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  
+                  {banditoreSelectedTeam && (
+                    <Alert severity="warning" sx={{ fontSize: '0.8rem' }}>
+                      <Typography variant="body2">
+                        🔨 Squadra selezionata: <strong>{banditoreSelectedTeam.name}</strong>
+                        <br />
+                        Potrai fare offerte per conto di questa squadra.
+                      </Typography>
+                    </Alert>
+                  )}
+                  
+                  {!banditoreSelectedTeam && (
+                    <Alert severity="info" sx={{ fontSize: '0.8rem' }}>
+                      <Typography variant="body2">
+                        ℹ️ Seleziona una squadra per abilitare le offerte del banditore
+                      </Typography>
+                    </Alert>
+                  )}
+                </Box>
+                
                 {/* Alert quando auto-advance è disabilitato */}
                 {!autoAdvanceEnabled && (
                   <Alert severity="info" sx={{ fontSize: '0.8rem' }}>
@@ -1836,8 +2049,18 @@ const AuctionPage: React.FC = () => {
 
       {/* Custom Bid Dialog */}
       <Dialog open={showCustomDialog} onClose={() => setShowCustomDialog(false)}>
-        <DialogTitle>Inserisci la tua offerta</DialogTitle>
+        <DialogTitle>
+          {isBanditore && banditoreSelectedTeam 
+            ? `Offerta per: ${banditoreSelectedTeam.name}` 
+            : "Inserisci la tua offerta"
+          }
+        </DialogTitle>
         <DialogContent>
+          {isBanditore && banditoreSelectedTeam && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Stai facendo un'offerta come banditore per conto di: <strong>{banditoreSelectedTeam.name}</strong>
+            </Alert>
+          )}
           <TextField
             autoFocus
             margin="dense"
@@ -1853,7 +2076,7 @@ const AuctionPage: React.FC = () => {
         <DialogActions>
           <Button onClick={() => setShowCustomDialog(false)}>Annulla</Button>
           <Button 
-            onClick={handleCustomBid} 
+            onClick={isBanditore && banditoreSelectedTeam ? handleBanditoreCustomBid : handleCustomBid} 
             variant="contained"
             disabled={!auction?.currentPlayer || !customBid || parseInt(customBid) <= (auction?.currentBid || 0)}
           >
