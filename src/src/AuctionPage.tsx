@@ -133,6 +133,11 @@ const AuctionPage: React.FC = () => {
   const [autoAdvanceEnabled, setAutoAdvanceEnabled] = useState(true);
   const [previousPlayer, setPreviousPlayer] = useState<string | null>(null);
   const [banditoreSelectedTeam, setBanditoreSelectedTeam] = useState<TeamInfo | null>(null);
+  
+  // Temporary block state for bid buttons when other players bid
+  const [isTemporarilyBlocked, setIsTemporarilyBlocked] = useState(false);
+  const [lastBidder, setLastBidder] = useState<string | null>(null);
+  const [lastBidAmount, setLastBidAmount] = useState<number | null>(null);
 
   const DEFAULT_TEAM_BUDGET = 1000; // assumiamo budget iniziale se non fornito
 
@@ -633,6 +638,35 @@ const AuctionPage: React.FC = () => {
       setBanditoreSelectedTeam(null);
     }
   }, [auction?.currentPlayer, isBanditore]);
+
+  // Temporary block bid buttons when other players make bids
+  useEffect(() => {
+    if (!auction || isDisplayView || isBanditore) return;
+    
+    const currentBidder = auction.currentBidder;
+    const currentBid = auction.currentBid;
+    
+    // Check if this is a new bid from another player (not us)
+    if (currentBidder && currentBid !== null && 
+        currentBidder !== playerName && // Not from current user
+        currentBidder !== `${playerName} (via Banditore)` && // Not from banditore for current user
+        (currentBidder !== lastBidder || currentBid !== lastBidAmount)) { // Actually a new bid
+      
+      // Update tracking state
+      setLastBidder(currentBidder);
+      setLastBidAmount(currentBid);
+      
+      // Activate temporary block
+      setIsTemporarilyBlocked(true);
+      
+      // Remove block after 500ms
+      const timer = setTimeout(() => {
+        setIsTemporarilyBlocked(false);
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [auction?.currentBidder, auction?.currentBid, playerName, lastBidder, lastBidAmount, isDisplayView, isBanditore]);
 
   const handleJoinAsPlayer = async () => {
     if (!playerName.trim() || !auction) return;
@@ -1480,11 +1514,14 @@ const AuctionPage: React.FC = () => {
                   variant="contained"
                   size="medium"
                   onClick={() => handleBid(amount)}
-                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder()}
+                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder() || isTemporarilyBlocked}
                   sx={{ 
                     py: { xs: 1.5, sm: 2 },
                     fontSize: { xs: '1.6rem', sm: '1.7rem' },
-                    minHeight: { xs: '80px', sm: '88px' }
+                    minHeight: { xs: '80px', sm: '88px' },
+                    filter: isTemporarilyBlocked ? 'blur(1px)' : 'none',
+                    opacity: isTemporarilyBlocked ? 0.7 : 1,
+                    transition: 'filter 0.2s ease, opacity 0.2s ease'
                   }}
                 >
                   {amount === 1 ? `Incremento`: `+${amount}`}  ({(auction?.currentBid || 0) + amount})
@@ -1499,11 +1536,14 @@ const AuctionPage: React.FC = () => {
                   variant="contained"
                   size="medium"
                   onClick={() => handleBid(amount)}
-                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder()}
+                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder() || isTemporarilyBlocked}
                   sx={{ 
                     py: { xs: 1.5, sm: 2 },
                     fontSize: { xs: '0.7rem', sm: '0.8rem' },
-                    minHeight: { xs: '40px', sm: '48px' }
+                    minHeight: { xs: '40px', sm: '48px' },
+                    filter: isTemporarilyBlocked ? 'blur(1px)' : 'none',
+                    opacity: isTemporarilyBlocked ? 0.7 : 1,
+                    transition: 'filter 0.2s ease, opacity 0.2s ease'
                   }}
                 >
                   +${amount} ({(auction?.currentBid || 0) + amount})
@@ -1550,13 +1590,16 @@ const AuctionPage: React.FC = () => {
                       console.error("Errore nel fare l'offerta:", error);
                     }
                   }}
-                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder() || fixedAmount <= (auction?.currentBid || 0)}
+                  disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder() || fixedAmount <= (auction?.currentBid || 0) || isTemporarilyBlocked}
                   sx={{ 
                     py: { xs: 1.5, sm: 2 },
                     fontSize: { xs: '0.8rem', sm: '0.9rem' },
                     minHeight: { xs: '40px', sm: '48px' },
                     borderColor: 'primary.main',
                     color: 'primary.main',
+                    filter: isTemporarilyBlocked ? 'blur(1px)' : 'none',
+                    opacity: isTemporarilyBlocked ? 0.7 : 1,
+                    transition: 'filter 0.2s ease, opacity 0.2s ease',
                     '&:hover': {
                       backgroundColor: 'primary.light',
                       borderColor: 'primary.dark',
@@ -1574,8 +1617,13 @@ const AuctionPage: React.FC = () => {
               size="large"
               startIcon={<Euro />}
               onClick={() => setShowCustomDialog(true)}
-              disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder()}
-              sx={{ py: { xs: 1.5, sm: 2 } }}
+              disabled={auction?.isLocked || !hasJoined || !auction?.currentPlayer || !canUserBidOnCurrentPlayer() || isCurrentUserHighestBidder() || isTemporarilyBlocked}
+              sx={{ 
+                py: { xs: 1.5, sm: 2 },
+                filter: isTemporarilyBlocked ? 'blur(1px)' : 'none',
+                opacity: isTemporarilyBlocked ? 0.7 : 1,
+                transition: 'filter 0.2s ease, opacity 0.2s ease'
+              }}
             >
               Offerta Personalizzata
             </Button>
@@ -1584,6 +1632,13 @@ const AuctionPage: React.FC = () => {
               {isCurrentUserHighestBidder() && (
                 <Alert severity="info" sx={{ mt: 2 }}>
                   🏆 Sei già il miglior offerente! Aspetta che qualcun altro rilanci per poter aumentare la tua offerta.
+                </Alert>
+              )}
+              
+              {/* Messaggio quando i pulsanti sono temporaneamente bloccati */}
+              {isTemporarilyBlocked && (
+                <Alert severity="warning" sx={{ mt: 2 }}>
+                  ⏸️ Offerta in arrivo... Pulsanti temporaneamente bloccati per evitare conflitti!
                 </Alert>
               )}
               
